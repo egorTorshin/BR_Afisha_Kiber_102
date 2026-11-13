@@ -7,6 +7,17 @@ export const dynamic = "force-dynamic";
 type Params = Record<string, string | string[] | undefined>;
 const periods = ["week", "month", "all"] as const;
 function one(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] : value; }
+function bashkortostanDate(daysAhead = 0) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Yekaterinburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value);
+  const date = new Date(Date.UTC(value("year"), value("month") - 1, value("day") + daysAhead));
+  return date.toISOString().slice(0, 10);
+}
 function validText(value: string | undefined, label: string) {
   if (!value) return undefined;
   const text = value.trim();
@@ -22,10 +33,8 @@ function filtersFor(params: Params): { filters: EventFilters; height: number } {
   if (!/^\d{2,4}$/.test(rawHeight) || Number(rawHeight) < 240 || Number(rawHeight) > 1000) throw new Error("height должен быть от 240 до 1000 пикселей");
   const filters: EventFilters = { city, category, page: 1, page_size: 12, sort: "date_asc" };
   if (period !== "all") {
-    const end = new Date();
-    end.setDate(end.getDate() + (period === "week" ? 7 : 30));
-    filters.date_from = new Date().toISOString().slice(0, 10);
-    filters.date_to = end.toISOString().slice(0, 10);
+    filters.date_from = bashkortostanDate();
+    filters.date_to = bashkortostanDate(period === "week" ? 7 : 30);
   }
   return { filters, height: Number(rawHeight) };
 }

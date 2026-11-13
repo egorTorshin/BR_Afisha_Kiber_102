@@ -41,6 +41,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 10000): 
     const response = await fetch(`${base}${path}`, {
       ...init,
       cache: "no-store",
+      credentials: "same-origin",
       signal: controller.signal,
       headers: {
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
