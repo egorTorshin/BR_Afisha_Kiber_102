@@ -90,6 +90,7 @@ class EventRecord:
     updated_at: str
     raw_event_id: Optional[str] = None
     sources: List[EventSource] = field(default_factory=list)
+    distance_km: Optional[float] = None
 
     @classmethod
     def from_row(cls, row: Dict[str, Any]) -> "EventRecord":
@@ -143,6 +144,7 @@ class SearchFilters:
     city: Optional[str] = None
     venue: Optional[str] = None
     category: Optional[str] = None
+    categories: List[str] = field(default_factory=list)
     date_preset: Optional[str] = None  # today, tomorrow, weekend, week, custom
     date_from: Optional[str] = None
     date_to: Optional[str] = None
@@ -163,6 +165,7 @@ class SearchFilters:
             self.city,
             self.venue,
             self.category,
+            self.categories,
             self.date_preset,
             self.date_from,
             self.date_to,
@@ -180,7 +183,9 @@ class SearchFilters:
         parts = []
         if self.city:
             parts.append(f"город: {self.city}")
-        if self.category:
+        if self.categories:
+            parts.append(f"категории: {', '.join(self.categories)}")
+        elif self.category:
             parts.append(f"категория: {self.category}")
         if self.venue:
             parts.append(f"площадка: {self.venue}")

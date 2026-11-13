@@ -171,19 +171,26 @@ class TelegramPollingRunner:
 
                 bot_resp = self.router.handle_callback(user_id, data)
                 if chat_id is not None and message_id is not None:
-                    await self.edit_or_replace_screen(
-                        client,
-                        chat_id=int(chat_id),
-                        message_id=int(message_id),
-                        text=bot_resp.text,
-                        reply_markup=bot_resp.reply_markup,
-                        parse_mode=bot_resp.parse_mode,
-                    )
+                    # Reply keyboards (contact/location request) cannot be attached while
+                    # editing an inline message, so send a fresh prompt in this one case.
+                    if bot_resp.reply_markup and ("keyboard" in bot_resp.reply_markup or "remove_keyboard" in bot_resp.reply_markup):
+                        await self.send_new_screen(client, int(chat_id), bot_resp.text, bot_resp.reply_markup,
+                                                   bot_resp.parse_mode, delete_previous_bot_msg=False)
+                    else:
+                        await self.edit_or_replace_screen(
+                            client,
+                            chat_id=int(chat_id),
+                            message_id=int(message_id),
+                            text=bot_resp.text,
+                            reply_markup=bot_resp.reply_markup,
+                            parse_mode=bot_resp.parse_mode,
+                        )
                 return
 
             if "message" in upd:
                 msg = upd["message"]
                 chat_id = int(msg["chat"]["id"])
+                incoming_message_id = int(msg["message_id"])
                 user_id = str(msg.get("from", {}).get("id", chat_id))
 
                 if "document" in msg:
@@ -220,6 +227,34 @@ class TelegramPollingRunner:
                     )
                     return
 
+                if "contact" in msg:
+                    contact = msg["contact"]
+                    # Never trust a forwarded contact as the user's own registration phone.
+                    if str(contact.get("user_id", user_id)) != user_id:
+                        bot_resp = BotResponse(text="Пожалуйста, отправьте свой номер кнопкой в этом чате.")
+                    else:
+                        bot_resp = self.router.handle_contact(user_id, str(contact.get("phone_number", "")))
+                    await self.send_new_screen(client, chat_id, bot_resp.text, bot_resp.reply_markup,
+                                               bot_resp.parse_mode, delete_previous_bot_msg=True)
+                    await self._safe_delete_message(client, chat_id, incoming_message_id)
+                    return
+
+                if "location" in msg:
+                    location = msg["location"]
+                    bot_resp = self.router.handle_location(user_id, float(location["latitude"]), float(location["longitude"]))
+                    await self.send_new_screen(client, chat_id, bot_resp.text, bot_resp.reply_markup,
+                                               bot_resp.parse_mode, delete_previous_bot_msg=True)
+                    await self._safe_delete_message(client, chat_id, incoming_message_id)
+                    return
+
+                if "voice" in msg:
+                    bot_resp = BotResponse(text=("🎙 Голосовой запрос получен. Распознавание речи подключается через внешний "
+                                                 "speech-to-text сервис; пока отправьте тот же запрос текстом."))
+                    await self.send_new_screen(client, chat_id, bot_resp.text, bot_resp.reply_markup,
+                                               bot_resp.parse_mode, delete_previous_bot_msg=True)
+                    await self._safe_delete_message(client, chat_id, incoming_message_id)
+                    return
+
                 text = msg.get("text", "")
                 bot_resp = self.router.handle_message(user_id, text)
                 await self.send_new_screen(
@@ -230,6 +265,7 @@ class TelegramPollingRunner:
                     bot_resp.parse_mode,
                     delete_previous_bot_msg=True,
                 )
+                await self._safe_delete_message(client, chat_id, incoming_message_id)
         except Exception as exc:
             log_event(
                 self.logger,

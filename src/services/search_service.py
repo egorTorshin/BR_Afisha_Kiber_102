@@ -1,4 +1,5 @@
 from dataclasses import replace
+from math import asin, cos, radians, sin, sqrt
 from typing import Any, Dict, List, Optional, Tuple
 from src.db.connection import Database
 from src.models.schemas import EventRecord, EventSource, SearchFilters
@@ -25,6 +26,15 @@ class SearchService:
             "SELECT * FROM event_sources WHERE event_id = ? ORDER BY source_url", (result.id,)
         )]
         return result
+
+    @staticmethod
+    def distance_km(latitude: float, longitude: float, event: EventRecord) -> Optional[float]:
+        """Great-circle distance; returns None where an event has no coordinates."""
+        if event.lat is None or event.lon is None:
+            return None
+        d_lat, d_lon = radians(event.lat - latitude), radians(event.lon - longitude)
+        a = sin(d_lat / 2) ** 2 + cos(radians(latitude)) * cos(radians(event.lat)) * sin(d_lon / 2) ** 2
+        return 6371 * 2 * asin(sqrt(a))
 
     def get_event_by_id(self, event_id: str, *, include_drafts: bool = False) -> Optional[EventRecord]:
         # include_drafts is for trusted internal callers, never a public API parameter.
@@ -72,7 +82,16 @@ class SearchService:
             city = resolve_city(filters.city, db=self.db) or filters.city
             clauses.append("search_city = ?")
             params.append(normalize_text(city))
-        if filters.category:
+        selected_categories = list(dict.fromkeys(([filters.category] if filters.category else []) + filters.categories))
+        if len(selected_categories) == 1:
+            category = resolve_category(selected_categories[0], db=self.db) or selected_categories[0]
+            clauses.append("category = ?")
+            params.append(normalize_text(category))
+        elif selected_categories:
+            normalized = [normalize_text(resolve_category(value, db=self.db) or value) for value in selected_categories]
+            clauses.append(f"category IN ({', '.join('?' for _ in normalized)})")
+            params.extend(normalized)
+        elif filters.category:
             category = resolve_category(filters.category, db=self.db) or filters.category
             clauses.append("category = ?")
             params.append(normalize_text(category))
@@ -137,6 +156,52 @@ class SearchService:
         if total == 0:
             explanation = self.explain_empty_result(filters)
         return page, total, explanation
+
+    def search_for_profile(self, filters: SearchFilters, latitude: Optional[float], longitude: Optional[float],
+                           favorite_categories: Optional[list[str]] = None) -> Tuple[List[EventRecord], int, Optional[str]]:
+        """Date → preferred category → distance. Missing coordinates stay at the end."""
+        if latitude is None or longitude is None:
+            return self.search(filters)
+        where_sql, params = self._query_sql(filters)
+        rows = self.db.fetchall(f"SELECT * FROM events WHERE {where_sql}", params)
+        events = [EventRecord.from_row(row) for row in rows]
+        favorites = set(favorite_categories or [])
+
+        for event in events:
+            event.distance_km = self.distance_km(latitude, longitude, event)
+
+        def distance(event: EventRecord) -> float:
+            return event.distance_km if event.distance_km is not None else float("inf")
+
+        events.sort(key=lambda e: (e.date_start, 0 if e.category in favorites else 1, distance(e), e.id))
+        total = len(events)
+        page = events[filters.offset:filters.offset + filters.limit]
+        return page, total, self.explain_empty_result(filters) if not page else None
+
+    def recommend_alternatives(self, filters: SearchFilters, reference_date) -> tuple[str, list[EventRecord]]:
+        """Prefer future alternatives in the chosen city, then nearest other city."""
+        future_from = f"{reference_date.isoformat()}T00:00:00"
+        same_city = replace(filters, category=None, categories=[], date_preset=None,
+                            date_from=future_from, date_to=None, query_text=None, offset=0, limit=2)
+        local_events, local_total, _ = self.search(same_city)
+        if local_total:
+            return "same_city", local_events
+
+        broad = replace(filters, city=None, category=None, categories=[], date_preset=None,
+                        date_from=future_from, date_to=None, query_text=None, offset=0, limit=100)
+        candidates, _, _ = self.search(broad)
+        if not candidates:
+            return "none", []
+        origin = self.db.fetchone(
+            "SELECT AVG(lat) AS lat, AVG(lon) AS lon FROM events WHERE city = ? AND lat IS NOT NULL AND lon IS NOT NULL",
+            (filters.city,),
+        ) if filters.city else None
+        if origin and origin.get("lat") is not None and origin.get("lon") is not None:
+            for event in candidates:
+                event.distance_km = self.distance_km(float(origin["lat"]), float(origin["lon"]), event)
+            candidates.sort(key=lambda event: (event.distance_km is None, event.distance_km or float("inf"), event.date_start, event.id))
+            return "nearby_city", candidates[:2]
+        return "other_city", candidates[:2]
 
     def explain_empty_result(self, filters: SearchFilters) -> str:
         """

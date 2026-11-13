@@ -10,6 +10,7 @@ from src.bot.formatter import (
     format_search_results,
     format_subscriptions_list,
     format_welcome_message,
+    format_datetime_ru,
 )
 from src.bot.keyboards import (
     agent_results_keyboard,
@@ -22,15 +23,27 @@ from src.bot.keyboards import (
     prices_keyboard,
     search_results_keyboard,
     subscriptions_keyboard,
+    contact_keyboard,
+    home_keyboard,
+    language_keyboard,
+    leisure_categories_keyboard,
+    leisure_search_keyboard,
+    leisure_cities_keyboard,
+    leisure_dates_keyboard,
+    location_keyboard,
+    profile_categories_keyboard,
+    profile_keyboard,
+    remove_reply_keyboard,
 )
 from src.config import Settings
 from src.db.connection import Database
 from src.models.schemas import SearchFilters
 from src.services.import_service import ImportService
 from src.services.agent_service import AgentService
-from src.services.normalizer import parse_free_text_query, parse_iso_datetime, resolve_date_preset
+from src.services.normalizer import parse_free_text_query, parse_iso_datetime, resolve_date_preset, resolve_city, resolve_category
 from src.services.search_service import SearchService
 from src.services.subscription_service import SubscriptionService
+from src.services.profile_service import ProfileService
 from src.utils.logger import get_logger, log_event, new_request_id
 from src.utils.rate_limiter import RateLimiter
 
@@ -55,11 +68,14 @@ class BotRouter:
                                             max_import_rows=settings.max_import_rows)
         self.sub_service = SubscriptionService(db, retention_days=settings.subscription_retention_days)
         self.agent_service = AgentService(db, settings)
+        self.profile_service = ProfileService(db)
         self.rate_limiter = RateLimiter(max_requests_per_minute=settings.rate_limit_per_minute)
         self.logger = get_logger("afisha_rb.bot", settings.log_level)
 
         self._user_filters: Dict[str, SearchFilters] = {}
         self._awaiting_custom_date: Dict[str, bool] = {}
+        self._awaiting_profile_field: Dict[str, str] = {}
+        self._leisure_wizard: Dict[str, str] = {}
 
     def get_user_filters(self, user_id: str) -> SearchFilters:
         uid = str(user_id)
@@ -81,22 +97,53 @@ class BotRouter:
         return text == command or text.startswith(command + " ")
 
     def _build_main_menu_response(self, uid: str, prefix_notice: Optional[str] = None) -> BotResponse:
-        filters = self.get_user_filters(uid)
-        cnt = self.search_service.count_matching(filters)
-        subs_cnt = len(self.sub_service.list_subscriptions(uid))
-        welcome = format_welcome_message(filters, matching_count=cnt)
-        if prefix_notice:
-            welcome = f"{prefix_notice}\n\n{welcome}"
-        return BotResponse(
-            text=welcome,
-            reply_markup=main_menu_keyboard(filters, matching_count=cnt, subs_count=subs_cnt),
-        )
+        profile = self.profile_service.get(uid)
+        if profile and profile.get("onboarding_state") == "complete":
+            name = html.escape(profile.get("name") or "")
+            greeting = "Доброго времени суток! Я помогу вам с выбором досуга на основе ваших интересов, расписания и компании."
+            if name:
+                greeting = f"{greeting}\n\nРада вас видеть, <b>{name}</b>!"
+            if prefix_notice:
+                greeting = f"{prefix_notice}\n\n{greeting}"
+            return BotResponse(text=greeting, reply_markup=home_keyboard())
+        if not profile:
+            return BotResponse(text="<b>Выберите язык / Телде һайлағыҙ / Choose language</b>", reply_markup=language_keyboard())
+        return BotResponse(text="Продолжите регистрацию через /start.")
 
     def _execute_search_response(self, user_id: str) -> BotResponse:
         uid = str(user_id)
         filters = self.get_user_filters(uid)
-        events, total, explanation = self.search_service.search(filters)
+        profile = self.profile_service.get(uid)
+        if profile and profile.get("onboarding_state") == "complete":
+            events, total, explanation = self.search_service.search_for_profile(
+                filters, profile.get("latitude"), profile.get("longitude"), profile.get("favorite_categories"),
+            )
+        else:
+            events, total, explanation = self.search_service.search(filters)
         is_sub = self.sub_service.is_subscribed(uid, filters.city, filters.category)
+        if total == 0 and profile and profile.get("onboarding_state") == "complete":
+            recommendation_kind, alternatives = self.search_service.recommend_alternatives(
+                filters, self.settings.get_reference_date()
+            )
+            if alternatives:
+                if recommendation_kind == "same_city":
+                    intro = (f"К сожалению, по выбранным фильтрам в городе <b>{html.escape(filters.city or '')}</b> "
+                             "ничего не удалось найти. Могу предложить ближайшие мероприятия в этом же городе:")
+                elif recommendation_kind == "nearby_city":
+                    intro = ("К сожалению, в выбранном городе подходящих будущих мероприятий нет. "
+                             "Могу предложить варианты в ближайшем городе:")
+                else:
+                    intro = "К сожалению, подходящих мероприятий не найдено. Могу предложить ближайшие варианты:"
+                lines = [intro]
+                for index, event in enumerate(alternatives, start=1):
+                    distance = f", {event.distance_km:.1f} км от выбранного города" if event.distance_km is not None else ""
+                    lines.append(f"\n<b>{chr(96 + index)}) {html.escape(event.title)}</b>\n"
+                                 f"📅 {format_datetime_ru(event.date_start)}\n📍 {html.escape(event.city)}{distance}")
+                keyboard = {"inline_keyboard": [
+                    [{"text": f"📌 {event.title[:34]}", "callback_data": f"card:{event.id}"}]
+                    for event in alternatives
+                ] + [[{"text": "✨ Новый поиск", "callback_data": "leisure:start"}]]}
+                return BotResponse(text="\n".join(lines), reply_markup=keyboard)
         text = format_search_results(events, total, filters, empty_explanation=explanation)
         kb = search_results_keyboard(events, total, filters, is_subscribed=is_sub)
         return BotResponse(text=text, reply_markup=kb)
@@ -160,6 +207,26 @@ class BotRouter:
                     ev_id = parts[1][len("event_"):]
                     return self._open_card(uid, ev_id)
                 self.reset_user_filters(uid)
+                profile = self.profile_service.get(uid)
+                if not profile:
+                    return BotResponse(
+                        text=("<b>Доброго времени суток!</b> Я помогу подобрать досуг с учётом ваших "
+                              "интересов, расписания и компании.\n\n"
+                              "<b>Выберите язык / Телде һайлағыҙ / Choose language</b>"),
+                        reply_markup=language_keyboard(),
+                    )
+                if profile.get("onboarding_state") != "complete":
+                    prompts = {
+                        "name": "👋 <b>Как к вам обращаться?</b> Введите ваше имя.",
+                        "phone": "📱 <b>Укажите номер телефона.</b> Он нужен только для уведомлений о новых мероприятиях; мы не передаём его организаторам.",
+                        "city": "🏙 <b>В каком городе вы живёте?</b> Это необязательное поле для местных уведомлений. Напишите город или пропустите шаг.",
+                    }
+                    state = profile.get("onboarding_state", "name")
+                    markup = contact_keyboard() if state == "phone" else (
+                        {"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]}
+                        if state == "city" else None
+                    )
+                    return BotResponse(text=prompts.get(state, prompts["name"]), reply_markup=markup)
                 return self._build_main_menu_response(uid)
 
             if self._is_command(clean_text, "/search"):
@@ -204,6 +271,53 @@ class BotRouter:
                 ev_id = clean_text[len("/event_"):].split()[0]
                 return self._open_card(uid, ev_id)
 
+            profile = self.profile_service.get(uid)
+            if profile and profile.get("onboarding_state") != "complete":
+                return self._handle_profile_text(uid, clean_text, profile)
+            field = self._awaiting_profile_field.pop(uid, None)
+            if field:
+                return self._save_profile_field(uid, field, clean_text)
+
+            if self._leisure_wizard.get(uid) == "city":
+                city = resolve_city(clean_text, db=self.db)
+                if not city:
+                    return BotResponse(text="Не удалось распознать город. Напишите, например: Уфа, Салават или Стерлитамак.")
+                filters = self.get_user_filters(uid)
+                filters.city = city
+                self._leisure_wizard[uid] = "date"
+                return BotResponse(text="📅 <b>На какую дату ищем досуг?</b> Введите ДД.ММ.ГГГГ, например <code>15.11.2026</code>.")
+
+            if self._leisure_wizard.get(uid) == "city_manual":
+                city = resolve_city(clean_text, db=self.db)
+                if not city:
+                    return BotResponse(text="Не удалось распознать город. Проверьте написание или выберите вариант кнопкой.", reply_markup=leisure_cities_keyboard())
+                self.get_user_filters(uid).city = city
+                self._leisure_wizard[uid] = "form"
+                return self._leisure_form_response(uid)
+
+            if self._leisure_wizard.get(uid) == "date":
+                return self._handle_custom_date_input(uid, clean_text)
+
+            if self._leisure_wizard.get(uid) == "date_manual":
+                try:
+                    iso_dt = parse_iso_datetime(clean_text if len(clean_text) != 5 else f"{clean_text}.{self.settings.get_reference_date().year}")
+                except ValueError:
+                    return BotResponse(text="Введите дату в формате ДД.ММ.ГГГГ, например 15.11.2026.")
+                filters = self.get_user_filters(uid)
+                filters.date_from, filters.date_to = f"{iso_dt[:10]}T00:00:00", f"{iso_dt[:10]}T23:59:59"
+                self._leisure_wizard[uid] = "form"
+                return self._leisure_form_response(uid)
+
+            if self._leisure_wizard.get(uid) == "category_manual":
+                category = resolve_category(clean_text, db=self.db)
+                if not category:
+                    return BotResponse(text="Такой вид досуга не найден. Выберите вариант кнопкой или уточните название.", reply_markup=leisure_categories_keyboard(self.get_user_filters(uid).categories))
+                filters = self.get_user_filters(uid)
+                if category not in filters.categories:
+                    filters.categories.append(category)
+                self._leisure_wizard[uid] = "form"
+                return self._leisure_form_response(uid)
+
             if self._is_command(clean_text, "/admin") or clean_text.startswith("/admin_"):
                 return self._handle_admin_command(uid, clean_text)
 
@@ -235,6 +349,9 @@ class BotRouter:
             filters.date_from = f"{day_str}T00:00:00"
             filters.date_to = f"{day_str}T23:59:59"
             filters.offset = 0
+            if self._leisure_wizard.get(uid) == "date":
+                self._leisure_wizard[uid] = "category"
+                return BotResponse(text="🎭 <b>Выберите интересующие виды досуга:</b>", reply_markup=leisure_categories_keyboard([]))
             return self._execute_search_response(uid)
         except ValueError:
             return BotResponse(
@@ -246,6 +363,80 @@ class BotRouter:
                 reply_markup=dates_keyboard(self.get_user_filters(uid).date_preset),
             )
 
+    def _leisure_form_response(self, uid: str, notice: str = "") -> BotResponse:
+        text = "<b>Настройте поиск досуга</b>\nВыберите город, дату и интересующие виды досуга."
+        if notice:
+            text = f"{notice}\n\n{text}"
+        return BotResponse(text=text, reply_markup=leisure_search_keyboard(self.get_user_filters(uid)))
+
+    def _handle_profile_text(self, uid: str, text: str, profile: Dict[str, Any]) -> BotResponse:
+        state = profile.get("onboarding_state")
+        if state == "name":
+            if len(text) < 2 or len(text) > 80:
+                return BotResponse(text="Введите имя от 2 до 80 символов.")
+            self.profile_service.update(uid, name=text, onboarding_state="phone")
+            return BotResponse(
+                text=("📱 <b>Укажите номер телефона.</b> Он нужен только для уведомлений о новых мероприятиях "
+                      "в вашем городе и не передаётся организаторам.\n\n"
+                      "Отправьте контакт кнопкой ниже или введите номер в международном формате."),
+                reply_markup=contact_keyboard(),
+            )
+        if state == "phone":
+            digits = "".join(char for char in text if char.isdigit())
+            if len(digits) < 10 or len(digits) > 15:
+                return BotResponse(text="Пожалуйста, отправьте номер кнопкой или введите корректный номер.", reply_markup=contact_keyboard())
+            self.profile_service.update(uid, phone=text, onboarding_state="city")
+            return BotResponse(text="🏙 <b>В каком городе вы живёте?</b> Это необязательно: город нужен только для местных уведомлений. Напишите город или нажмите «Пропустить».", reply_markup={"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]})
+        if state == "city":
+            city = resolve_city(text, db=self.db)
+            if not city:
+                return BotResponse(text="Не нашла такой город в каталоге. Проверьте написание или нажмите «Пропустить».", reply_markup={"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]})
+            self.profile_service.update(uid, city=city, onboarding_state="complete")
+            return self._build_main_menu_response(uid, "✅ Регистрация завершена.")
+        return self._build_main_menu_response(uid)
+
+    def _save_profile_field(self, uid: str, field: str, text: str) -> BotResponse:
+        if field == "phone":
+            digits = "".join(char for char in text if char.isdigit())
+            if len(digits) < 10 or len(digits) > 15:
+                self._awaiting_profile_field[uid] = field
+                return BotResponse(text="Введите корректный номер или отправьте контакт кнопкой.", reply_markup=contact_keyboard())
+        if field == "city":
+            city = resolve_city(text, db=self.db)
+            if not city:
+                self._awaiting_profile_field[uid] = field
+                return BotResponse(text="Не нашла такой город в каталоге. Проверьте написание и попробуйте ещё раз.")
+            text = city
+        self.profile_service.update(uid, **{field: text})
+        return self._profile_response(uid, "✅ Данные сохранены.")
+
+    def _profile_response(self, uid: str, notice: str = "") -> BotResponse:
+        profile = self.profile_service.get(uid) or {}
+        cats = ", ".join(profile.get("favorite_categories") or []) or "не выбраны"
+        location = "передана" if profile.get("latitude") is not None else "не передана"
+        text = (f"👤 <b>Профиль</b>\n\nИмя: <b>{html.escape(profile.get('name') or '—')}</b>\n"
+                f"Телефон: <b>{html.escape(profile.get('phone') or '—')}</b>\n"
+                f"Город: <b>{html.escape(profile.get('city') or '—')}</b>\n"
+                f"Любимые категории: <b>{html.escape(cats)}</b>\n"
+                f"Геолокация: <b>{location}</b>")
+        return BotResponse(text=(notice + "\n\n" if notice else "") + text, reply_markup=profile_keyboard(profile))
+
+    def handle_contact(self, user_id: str, phone: str) -> BotResponse:
+        profile = self.profile_service.get(str(user_id))
+        if not profile:
+            return BotResponse(text="Сначала начните с /start.")
+        state = profile.get("onboarding_state")
+        if state == "phone":
+            self.profile_service.update(str(user_id), phone=phone, onboarding_state="city")
+            return BotResponse(text="🏙 <b>В каком городе вы живёте?</b> Это необязательное поле для местных уведомлений. Напишите город или пропустите этот шаг.", reply_markup={"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]})
+        self.profile_service.update(str(user_id), phone=phone)
+        return self._profile_response(str(user_id), "✅ Телефон обновлён.")
+
+    def handle_location(self, user_id: str, latitude: float, longitude: float) -> BotResponse:
+        self.profile_service.ensure(str(user_id))
+        self.profile_service.update(str(user_id), latitude=latitude, longitude=longitude)
+        return self._profile_response(str(user_id), "✅ Геолокация сохранена. Она используется только для сортировки мероприятий по близости и никуда не передаётся.")
+
     def _open_card(self, uid: str, event_id_or_prefix: str) -> BotResponse:
         ev = self.search_service.get_event_by_id(event_id_or_prefix, include_drafts=self.is_admin(uid))
         if not ev:
@@ -253,6 +444,9 @@ class BotRouter:
                 uid,
                 prefix_notice="⚠️ Событие с указанным идентификатором не найдено в базе данных.",
             )
+        profile = self.profile_service.get(uid)
+        if profile and profile.get("latitude") is not None and profile.get("longitude") is not None:
+            ev.distance_km = self.search_service.distance_km(profile["latitude"], profile["longitude"], ev)
         is_sub = self.sub_service.is_subscribed(uid, ev.city, ev.category)
         return BotResponse(
             text=format_event_card(ev),
@@ -273,6 +467,112 @@ class BotRouter:
         self._awaiting_custom_date.pop(uid, None)
 
         try:
+            if callback_data.startswith("lang:"):
+                language = callback_data.split(":", 1)[1]
+                if language not in {"ru", "ba", "en"}:
+                    return BotResponse(text="Выберите язык кнопкой ниже.", reply_markup=language_keyboard())
+                self.profile_service.ensure(uid, language)
+                return BotResponse(text="👋 <b>Как к вам обращаться?</b> Введите ваше имя.")
+
+            if callback_data == "onboarding:skip_city":
+                self.profile_service.update(uid, city=None, onboarding_state="complete")
+                return self._build_main_menu_response(uid, "✅ Регистрация завершена.")
+
+            if callback_data == "profile:open":
+                return self._profile_response(uid)
+
+            if callback_data.startswith("profile:edit:"):
+                field = callback_data.rsplit(":", 1)[1]
+                if field not in {"name", "phone", "city"}:
+                    return self._profile_response(uid)
+                self._awaiting_profile_field[uid] = field
+                prompt = {"name": "Введите новое имя.", "phone": "Отправьте новый номер кнопкой или введите его текстом.", "city": "Введите город проживания."}[field]
+                return BotResponse(text=prompt, reply_markup=contact_keyboard() if field == "phone" else None)
+
+            if callback_data == "profile:categories":
+                profile = self.profile_service.get(uid) or {}
+                return BotResponse(text="🎭 <b>Выберите любимые категории</b> — можно несколько.", reply_markup=profile_categories_keyboard(profile.get("favorite_categories") or []))
+
+            if callback_data.startswith("profile:cat:"):
+                category = callback_data.rsplit(":", 1)[1]
+                profile = self.profile_service.get(uid) or {}
+                selected = list(profile.get("favorite_categories") or [])
+                if category in selected:
+                    selected.remove(category)
+                else:
+                    selected.append(category)
+                self.profile_service.update(uid, favorite_categories=selected)
+                return BotResponse(text="🎭 <b>Выберите любимые категории</b> — можно несколько.", reply_markup=profile_categories_keyboard(selected))
+
+            if callback_data == "profile:done":
+                return self._profile_response(uid, "✅ Любимые категории сохранены.")
+
+            if callback_data == "profile:location":
+                return BotResponse(text="📍 Передайте геолокацию кнопкой ниже. Она нужна только для сортировки найденных мероприятий по близости и не передаётся организаторам.", reply_markup=location_keyboard())
+
+            if callback_data == "leisure:start":
+                self.reset_user_filters(uid)
+                self._leisure_wizard[uid] = "form"
+                return self._leisure_form_response(uid)
+
+            if callback_data == "leisure:form":
+                self._leisure_wizard[uid] = "form"
+                return self._leisure_form_response(uid)
+
+            if callback_data == "leisure:city_menu":
+                return BotResponse(text="🏙 <b>Выберите город</b> или введите свой вручную.", reply_markup=leisure_cities_keyboard())
+
+            if callback_data == "leisure:city_manual":
+                self._leisure_wizard[uid] = "city_manual"
+                return BotResponse(text="🏙 Введите название города.")
+
+            if callback_data.startswith("leisure:city:"):
+                self.get_user_filters(uid).city = callback_data.rsplit(":", 1)[1]
+                self._leisure_wizard[uid] = "form"
+                return self._leisure_form_response(uid)
+
+            if callback_data == "leisure:date_menu":
+                return BotResponse(text="📅 <b>Выберите дату</b> или введите свою вручную.", reply_markup=leisure_dates_keyboard())
+
+            if callback_data == "leisure:date_manual":
+                self._leisure_wizard[uid] = "date_manual"
+                return BotResponse(text="📅 Введите дату в формате ДД.ММ.ГГГГ, например 15.11.2026.")
+
+            if callback_data.startswith("leisure:date:"):
+                preset = callback_data.rsplit(":", 1)[1]
+                filters = self.get_user_filters(uid)
+                filters.date_preset = preset
+                filters.date_from, filters.date_to = resolve_date_preset(preset, self.settings.get_reference_date())
+                self._leisure_wizard[uid] = "form"
+                return self._leisure_form_response(uid)
+
+            if callback_data == "leisure:category_menu":
+                return BotResponse(text="🎭 <b>Выберите один или несколько видов досуга.</b>", reply_markup=leisure_categories_keyboard(self.get_user_filters(uid).categories))
+
+            if callback_data == "leisure:category_manual":
+                self._leisure_wizard[uid] = "category_manual"
+                return BotResponse(text="🎭 Напишите вид досуга, например: лекция, мастер-класс или спектакль.")
+
+            if callback_data.startswith("leisure:cat:"):
+                category = callback_data.rsplit(":", 1)[1]
+                filters = self.get_user_filters(uid)
+                if category in filters.categories:
+                    filters.categories.remove(category)
+                else:
+                    filters.categories.append(category)
+                return BotResponse(text="🎭 <b>Выберите один или несколько видов досуга.</b>", reply_markup=leisure_categories_keyboard(filters.categories))
+
+            if callback_data == "leisure:categories_done":
+                self._leisure_wizard[uid] = "form"
+                return self._leisure_form_response(uid)
+
+            if callback_data == "leisure:run":
+                filters = self.get_user_filters(uid)
+                if not filters.city or not filters.date_from or not filters.categories:
+                    return self._leisure_form_response(uid, "Заполните город, дату и хотя бы один вид досуга.")
+                self._leisure_wizard.pop(uid, None)
+                return self._execute_search_response(uid)
+
             if callback_data == "menu:main":
                 return self._build_main_menu_response(uid)
 

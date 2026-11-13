@@ -163,6 +163,8 @@ def format_event_card(ev: EventRecord) -> str:
 
     lines.append(f"🏛 <b>Город и площадка:</b> г. {html.escape(ev.city)}, {html.escape(ev.venue)}")
     lines.append(f"📍 <b>Адрес:</b> {html.escape(ev.address)}")
+    if ev.distance_km is not None:
+        lines.append(f"📏 <b>От вас:</b> {ev.distance_km:.1f} км")
     lines.append(f"💳 <b>Стоимость:</b> {format_price_ru(ev)}")
     lines.append(f"🔞 <b>Возрастное ограничение:</b> {ev.age_limit}+")
     if ev.language:
@@ -212,6 +214,7 @@ def format_search_results(
             f"   {badge} • 💳 <b>{price_str}</b>\n"
             f"   📅 {dt_str}\n"
             f"   📍 г. {html.escape(ev.city)}, {html.escape(ev.venue)}"
+            + (f" • {ev.distance_km:.1f} км от вас" if ev.distance_km is not None else "")
         )
     items.append("👇 <i>Выберите событие кнопкой ниже для просмотра карточки и ссылок на билеты:</i>")
     return "\n\n".join(items)

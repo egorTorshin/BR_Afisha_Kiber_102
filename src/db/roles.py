@@ -22,10 +22,10 @@ ROLE_TABLES = {
     },
     "afisha_bot": {
         "SELECT": ("cities", "categories", "venues", "events", "event_sources", "raw_events",
-                   "import_reports", "subscriptions", "audit_log", "feedback"),
+                   "import_reports", "subscriptions", "audit_log", "feedback", "bot_profiles"),
         "INSERT": ("events", "event_sources", "raw_events", "import_reports", "subscriptions",
-                   "audit_log"),
-        "UPDATE": ("events", "event_sources", "raw_events", "subscriptions", "feedback"),
+                   "audit_log", "bot_profiles"),
+        "UPDATE": ("events", "event_sources", "raw_events", "subscriptions", "feedback", "bot_profiles"),
         "DELETE": ("event_sources", "subscriptions"),
     },
     "afisha_maintenance": {
