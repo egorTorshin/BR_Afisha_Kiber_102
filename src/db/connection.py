@@ -15,6 +15,7 @@ class Database:
         self.database_url = database_url
         self.is_postgres = database_url.startswith("postgres://") or database_url.startswith("postgresql://")
         self._lock = threading.RLock()
+        self._local = threading.local()
         self._pg_pool = None
 
         if not self.is_postgres:
@@ -31,21 +32,31 @@ class Database:
             if db_path_str == ":memory:":
                 self._memory_conn = sqlite3.connect(":memory:", check_same_thread=False)
                 self._memory_conn.row_factory = sqlite3.Row
+                self._memory_conn.execute("PRAGMA foreign_keys = ON")
 
     def _get_pg_pool(self):
-        if self._pg_pool is None:
-            import psycopg2.pool
-            self._pg_pool = psycopg2.pool.ThreadedConnectionPool(
-                minconn=1,
-                maxconn=10,
-                dsn=self.database_url,
-                keepalives=1,
-                keepalives_idle=30,
-                keepalives_interval=10,
-                keepalives_count=5,
-                connect_timeout=5,
-            )
+        with self._lock:
+            if self._pg_pool is None:
+                import psycopg2.pool
+                self._pg_pool = psycopg2.pool.ThreadedConnectionPool(
+                    minconn=1,
+                    maxconn=10,
+                    dsn=self.database_url,
+                    keepalives=1,
+                    keepalives_idle=30,
+                    keepalives_interval=10,
+                    keepalives_count=5,
+                    connect_timeout=5,
+                )
         return self._pg_pool
+
+    def close(self):
+        if self._pg_pool is not None:
+            self._pg_pool.closeall()
+            self._pg_pool = None
+        if not self.is_postgres and self._memory_conn is not None:
+            self._memory_conn.close()
+            self._memory_conn = None
 
     def _adapt_sql(self, sql: str) -> str:
         if self.is_postgres:
@@ -54,6 +65,10 @@ class Database:
 
     @contextmanager
     def connect(self):
+        active = getattr(self._local, "connection", None)
+        if active is not None:
+            yield active
+            return
         if self.is_postgres:
             import psycopg2
             pool = self._get_pg_pool()
@@ -94,6 +109,7 @@ class Database:
             else:
                 conn = sqlite3.connect(self.sqlite_path, check_same_thread=False)
                 conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA foreign_keys = ON")
                 try:
                     yield conn
                     conn.commit()
@@ -102,6 +118,35 @@ class Database:
                     raise
                 finally:
                     conn.close()
+
+    @contextmanager
+    def transaction(self):
+        """Share one connection across service calls; nested units use savepoints."""
+        if getattr(self._local, "connection", None) is not None:
+            import uuid
+            name = "sp_" + uuid.uuid4().hex
+            self.execute(f"SAVEPOINT {name}")
+            try:
+                yield
+                self.execute(f"RELEASE SAVEPOINT {name}")
+            except Exception:
+                self.execute(f"ROLLBACK TO SAVEPOINT {name}")
+                self.execute(f"RELEASE SAVEPOINT {name}")
+                raise
+            return
+        with self.connect() as conn:
+            self._local.connection = conn
+            try:
+                if not self.is_postgres:
+                    conn.execute("BEGIN IMMEDIATE")
+                yield
+            finally:
+                self._local.connection = None
+
+    def lock_events(self):
+        """Serialize event identity resolution, including across importer processes."""
+        if self.is_postgres:
+            self.execute("LOCK TABLE events IN SHARE ROW EXCLUSIVE MODE")
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> int:
         adapted = self._adapt_sql(sql)
@@ -116,7 +161,15 @@ class Database:
                 cur = conn.cursor()
                 cur.execute(sql_script)
             else:
-                conn.executescript(sql_script)
+                # sqlite3.executescript implicitly commits an active transaction.
+                statement = ""
+                for character in sql_script:
+                    statement += character
+                    if character == ";" and sqlite3.complete_statement(statement):
+                        conn.execute(statement)
+                        statement = ""
+                if statement.strip():
+                    conn.execute(statement)
 
     def fetchone(self, sql: str, params: Sequence[Any] = ()) -> Optional[Dict[str, Any]]:
         adapted = self._adapt_sql(sql)

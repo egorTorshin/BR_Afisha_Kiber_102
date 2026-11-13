@@ -1,7 +1,7 @@
 from dataclasses import replace
 from typing import Any, Dict, List, Optional, Tuple
 from src.db.connection import Database
-from src.models.schemas import EventRecord, SearchFilters
+from src.models.schemas import EventRecord, EventSource, SearchFilters
 from src.services.normalizer import normalize_text, resolve_category, resolve_city
 
 
@@ -19,19 +19,28 @@ class SearchService:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    def get_event_by_id(self, event_id: str) -> Optional[EventRecord]:
+    def _record(self, row) -> EventRecord:
+        result = EventRecord.from_row(row)
+        result.sources = [EventSource(**source) for source in self.db.fetchall(
+            "SELECT * FROM event_sources WHERE event_id = ? ORDER BY source_url", (result.id,)
+        )]
+        return result
+
+    def get_event_by_id(self, event_id: str, *, include_drafts: bool = False) -> Optional[EventRecord]:
+        # include_drafts is for trusted internal callers, never a public API parameter.
         clean_id = event_id.strip()
         row = self.db.fetchone("SELECT * FROM events WHERE id = ?", (clean_id,))
+        if not row and len(clean_id) >= 8 and not any(c in clean_id for c in "%_"):
+            rows = self.db.fetchall("SELECT * FROM events WHERE id LIKE ? LIMIT 2", (f"{clean_id}%",))
+            if len(rows) == 1:
+                row = rows[0]
         if not row:
-            if len(clean_id) >= 8:
-                rows = self.db.fetchall(
-                    "SELECT * FROM events WHERE id LIKE ? LIMIT 2",
-                    (f"{clean_id}%",),
-                )
-                if len(rows) == 1:
-                    return EventRecord.from_row(rows[0])
             return None
-        return EventRecord.from_row(row)
+        while row.get("merged_into"):
+            row = self.db.fetchone("SELECT * FROM events WHERE id = ?", (row["merged_into"],))
+        if row["status"] == "draft" and not include_drafts:
+            return None
+        return self._record(row)
 
     def _matches_python_postfilters(self, ev: EventRecord, filters: SearchFilters) -> bool:
         # Независимая от локали СУБД проверка города, категории, площадки и языка на Python
@@ -90,8 +99,8 @@ class SearchService:
         return True
 
     def _query_candidates(self, filters: SearchFilters) -> List[EventRecord]:
-        clauses = ["status = ?"]
-        params: List[Any] = ["опубликовано"]
+        clauses = ["status = ?", "merged_into IS NULL"]
+        params: List[Any] = ["published"]
 
         if filters.date_from:
             clauses.append("(date_start >= ? OR (date_end IS NOT NULL AND date_end >= ?))")
@@ -102,9 +111,9 @@ class SearchService:
             params.append(filters.date_to)
 
         if filters.is_free_only:
-            clauses.append("(is_free = 1 OR price_min = 0)")
+            clauses.append("is_free = 1")
         elif filters.max_price is not None:
-            clauses.append("price_min <= ?")
+            clauses.append("COALESCE(price_min, price_max) <= ?")
             params.append(filters.max_price)
 
         if filters.max_age_limit is not None:
@@ -130,14 +139,31 @@ class SearchService:
     def count_matching(self, filters: SearchFilters) -> int:
         return len(self._query_candidates(filters))
 
-    def search(self, filters: SearchFilters) -> Tuple[List[EventRecord], int, Optional[str]]:
+    def search(self, filters: SearchFilters, *, sort: str = "date_asc") -> Tuple[List[EventRecord], int, Optional[str]]:
         """
         Выполняет поиск с пагинацией.
         Возвращает: (список событий на текущей странице, общее число подходящих событий, подсказка при пустом результате).
         """
         all_matches = self._query_candidates(filters)
+        if sort == "date_desc":
+            all_matches.sort(key=lambda ev: (ev.date_start, ev.id), reverse=True)
+        elif sort == "price_asc":
+            def price_key(ev):
+                price = ev.price_min if ev.price_min is not None else ev.price_max
+                return (price is None, price if price is not None else 0, ev.date_start, ev.id)
+            all_matches.sort(key=price_key)
+        elif sort != "date_asc":
+            raise ValueError("Недопустимая сортировка")
         total = len(all_matches)
         page = all_matches[filters.offset : filters.offset + filters.limit]
+        if page:
+            by_id = {event.id: event for event in page}
+            placeholders = ", ".join("?" for _ in page)
+            sources = self.db.fetchall(
+                f"SELECT * FROM event_sources WHERE event_id IN ({placeholders}) ORDER BY source_url", tuple(by_id)
+            )
+            for source in sources:
+                by_id[source["event_id"]].sources.append(EventSource(**source))
         explanation = None
         if total == 0:
             explanation = self.explain_empty_result(filters)
@@ -200,7 +226,7 @@ class SearchService:
         if filters.date_from and filters.date_to and filters.date_from[:10] == filters.date_to[:10]:
             day_prefix = filters.date_from[:10]
             cancelled_rows = self.db.fetchall(
-                "SELECT id, title, city, venue FROM events WHERE status = 'отменено' AND date_start LIKE ?",
+                "SELECT id, title, city, venue FROM events WHERE status = 'cancelled' AND merged_into IS NULL AND date_start LIKE ?",
                 (f"{day_prefix}%",),
             )
             if cancelled_rows:
@@ -228,7 +254,7 @@ class SearchService:
             """
             SELECT city, COUNT(DISTINCT dedup_key) AS cnt
             FROM events
-            WHERE status = 'опубликовано'
+            WHERE status = 'published' AND merged_into IS NULL
             GROUP BY city
             ORDER BY cnt DESC, city ASC
             """
@@ -244,3 +270,11 @@ class SearchService:
             {"category": cat, "cnt": cnt}
             for cat, cnt in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
         ]
+
+
+    def list_public_venues(self, city: Optional[str] = None) -> List[Dict[str, Any]]:
+        # Read actual catalog values; do not manufacture dictionary IDs/coordinates.
+        events = self._query_candidates(SearchFilters(city=city))
+        venues = {(ev.city, ev.venue, ev.address) for ev in events}
+        return [{"city": city, "name": name, "address": address}
+                for city, name, address in sorted(venues)]

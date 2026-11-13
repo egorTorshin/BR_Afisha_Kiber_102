@@ -12,11 +12,37 @@ VALID_CATEGORIES = {
     "другое",
 }
 
-VALID_STATUSES = {
-    "опубликовано",
-    "черновик",
-    "отменено",
+STATUS_ALIASES = {
+    "опубликовано": "published", "черновик": "draft", "отменено": "cancelled",
+    "published": "published", "draft": "draft", "cancelled": "cancelled",
 }
+VALID_STATUSES = set(STATUS_ALIASES)
+
+
+def normalize_status(value: str) -> str:
+    try:
+        return STATUS_ALIASES[value.strip().lower()]
+    except (KeyError, AttributeError):
+        raise ValueError(f"Недопустимый статус '{value}'") from None
+
+
+@dataclass
+class EventSource:
+    event_id: str
+    source_url: str
+    source_type: str
+    source_hash: str
+    verified_at: str
+
+
+@dataclass
+class FeedbackRecord:
+    id: str
+    event_id: Optional[str]
+    message: str
+    status: str
+    created_at: str
+
 
 VALID_SOURCE_TYPES = {
     "ручной ввод",
@@ -45,8 +71,8 @@ class EventRecord:
     lat: Optional[float]
     lon: Optional[float]
     description: str
-    price_min: int
-    price_max: int
+    price_min: Optional[int]
+    price_max: Optional[int]
     is_free: bool
     age_limit: int
     language: Optional[str]
@@ -63,6 +89,7 @@ class EventRecord:
     created_at: str
     updated_at: str
     raw_event_id: Optional[str] = None
+    sources: List[EventSource] = field(default_factory=list)
 
     @classmethod
     def from_row(cls, row: Dict[str, Any]) -> "EventRecord":
@@ -90,8 +117,8 @@ class EventRecord:
             lat=float(row["lat"]) if row.get("lat") is not None else None,
             lon=float(row["lon"]) if row.get("lon") is not None else None,
             description=row["description"],
-            price_min=int(row.get("price_min") or 0),
-            price_max=int(row.get("price_max") or 0),
+            price_min=int(row["price_min"]) if row.get("price_min") is not None else None,
+            price_max=int(row["price_max"]) if row.get("price_max") is not None else None,
             is_free=bool(row.get("is_free")),
             age_limit=int(row.get("age_limit") or 0),
             language=row.get("language"),

@@ -5,11 +5,11 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-afisha_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-afisha_pass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-afisha_dev_password}
       POSTGRES_DB: ${POSTGRES_DB:-afisha_db}
       POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=ru-RU"
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -18,24 +18,74 @@ services:
       timeout: 3s
       retries: 15
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uvicorn", "src.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-afisha_user}:${POSTGRES_PASSWORD:-afisha_dev_password}@db:5432/${POSTGRES_DB:-afisha_db}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_SECRET: ${ADMIN_SECRET:-}
+      ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      PUBLIC_CACHE_MAX_AGE: ${PUBLIC_CACHE_MAX_AGE:-60}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REFERENCE_DATE: ${REFERENCE_DATE:-}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        API_BASE_URL: http://api:8000
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: http://api:8000
+      NODE_ENV: production
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
   bot:
     build: .
     container_name: afisha_rb_bot
     restart: unless-stopped
     depends_on:
-      db:
+      api:
         condition: service_healthy
     env_file:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://afisha_user:afisha_pass@db:5432/afisha_db}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-afisha_user}:${POSTGRES_PASSWORD:-afisha_dev_password}@db:5432/${POSTGRES_DB:-afisha_db}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-123456789}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-30}
       SUBSCRIPTION_RETENTION_DAYS: ${SUBSCRIPTION_RETENTION_DAYS:-180}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      REFERENCE_DATE: ${REFERENCE_DATE:-2026-11-13}
+      REFERENCE_DATE: ${REFERENCE_DATE:-}
 
 volumes:
   pgdata:

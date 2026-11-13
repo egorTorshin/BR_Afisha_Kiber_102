@@ -41,8 +41,8 @@ def main() -> int:
     p_man.add_argument("--address", required=True, help="Улица и дом")
     p_man.add_argument("--description", required=True, help="Описание события")
     p_man.add_argument("--source-url", required=True, help="Ссылка на источник")
-    p_man.add_argument("--price-min", type=int, default=0, help="Минимальная цена (0 = бесплатно)")
-    p_man.add_argument("--price-max", type=int, default=0, help="Максимальная цена")
+    p_man.add_argument("--price-min", type=int, default=None, help="Минимальная цена (0 = бесплатно, без параметра — неизвестна)")
+    p_man.add_argument("--price-max", type=int, default=None, help="Максимальная цена")
     p_man.add_argument("--age-limit", type=int, default=0, help="Возрастное ограничение (0, 6, 12, 16, 18)")
     p_man.add_argument("--org-link", type=str, default="", help="Ссылка на покупку билетов")
     p_man.add_argument("--status", type=str, default="опубликовано", help="Статус (опубликовано, черновик, отменено)")
@@ -91,8 +91,7 @@ def main() -> int:
                 "description": args.description,
                 "source_url": args.source_url,
                 "price_min": args.price_min,
-                "price_max": args.price_max or args.price_min,
-                "is_free": (args.price_min == 0 and args.price_max == 0),
+                "price_max": args.price_max,
                 "age_limit": args.age_limit,
                 "org_link": args.org_link,
                 "status": args.status,
@@ -109,7 +108,7 @@ def main() -> int:
         return 0
 
     if args.command == "list-disputed":
-        rows = db.fetchall("SELECT id, title, city, status, confidence, dispute_reason FROM events WHERE is_disputed = 1")
+        rows = db.fetchall("SELECT id, title, city, status, confidence, dispute_reason FROM events WHERE is_disputed = 1 AND merged_into IS NULL")
         if not rows:
             print("Спорных карточек нет.")
             return 0

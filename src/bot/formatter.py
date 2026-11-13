@@ -43,8 +43,14 @@ def format_datetime_ru(iso_str: Optional[str]) -> str:
 
 
 def format_price_ru(ev: EventRecord) -> str:
-    if ev.is_free or (ev.price_min == 0 and ev.price_max == 0):
+    if ev.is_free:
         return "🆓 Бесплатно"
+    if ev.price_min is None and ev.price_max is None:
+        return "Стоимость уточняется"
+    if ev.price_min is None:
+        return f"до {ev.price_max} ₽"
+    if ev.price_max is None:
+        return f"от {ev.price_min} ₽"
     if ev.price_min == ev.price_max:
         return f"{ev.price_min} ₽"
     if ev.price_min == 0 and ev.price_max > 0:
@@ -138,10 +144,10 @@ def format_event_card(ev: EventRecord) -> str:
     При статусе 'отменено' выводится явная пометка (Раздел 6.1 ТЗ).
     """
     lines: List[str] = []
-    if ev.status == "отменено":
+    if ev.status in ("cancelled", "отменено"):
         lines.append("⚠️ <b>ВНИМАНИЕ: МЕРОПРИЯТИЕ ОТМЕНЕНО!</b>")
         lines.append("<i>Событие снято с активной выдачи, карточка доступна только по прямой ссылке.</i>\n")
-    elif ev.status == "черновик":
+    elif ev.status in ("draft", "черновик"):
         lines.append("📝 <b>СТАТУС: ЧЕРНОВИК (НА МОДЕРАЦИИ)</b>\n")
 
     lines.append(f"📌 <b>{html.escape(ev.title)}</b>")

@@ -12,7 +12,8 @@ from src.models.schemas import (
     VALID_AGE_LIMITS,
     VALID_CATEGORIES,
     VALID_SOURCE_TYPES,
-    VALID_STATUSES,
+    normalize_status,
+    EventSource,
 )
 from src.services.normalizer import (
     compute_dedup_key,
@@ -36,6 +37,60 @@ class ImportService:
     def __init__(self, db: Database) -> None:
         self.db = db
 
+    def list_sources(self, event_id: str) -> List[EventSource]:
+        return [EventSource(**row) for row in self.db.fetchall(
+            "SELECT * FROM event_sources WHERE event_id = ? ORDER BY source_url", (event_id,)
+        )]
+
+    def save_source(self, event_id: str, source: Dict[str, Any], actor: str) -> bool:
+        previous = self.db.fetchone(
+            "SELECT * FROM event_sources WHERE event_id = ? AND source_url = ?",
+            (event_id, source["source_url"]),
+        )
+        values = {key: source[key] for key in ("source_url", "source_type", "source_hash", "verified_at")}
+        changed = previous is None or any(
+            previous[k] != values[k] for k in values
+            if k != "verified_at" or source.get("_verified_explicit")
+        )
+        if not changed:
+            return False
+        self.db.execute(
+            """INSERT INTO event_sources (event_id, source_url, source_type, source_hash, verified_at)
+               VALUES (?, ?, ?, ?, ?) ON CONFLICT (event_id, source_url) DO UPDATE SET
+               source_type = excluded.source_type, source_hash = excluded.source_hash,
+               verified_at = excluded.verified_at""", (event_id, *values.values()),
+        )
+        self.log_audit(actor, "update_source" if previous else "add_source", "event", event_id,
+                       {"source": {"old": previous, "new": values}})
+        return True
+
+    def merge_events(self, target_id: str, duplicate_id: str, actor: str) -> None:
+        """Retain old IDs and event snapshots; move sources/references to the survivor."""
+        if target_id == duplicate_id:
+            return
+        with self.db.transaction():
+            self.db.lock_events()
+            target = self.db.fetchone("SELECT * FROM events WHERE id = ?", (target_id,))
+            duplicate = self.db.fetchone("SELECT * FROM events WHERE id = ?", (duplicate_id,))
+            if not target or not duplicate or target["merged_into"] or duplicate["merged_into"]:
+                raise ValueError("Объединять можно только существующие основные события")
+            sources = self.db.fetchall("SELECT * FROM event_sources WHERE event_id = ?", (duplicate_id,))
+            # Copy conflicting URL metadata into the audit snapshot before moving it.
+            self.db.execute("DELETE FROM event_sources WHERE event_id = ?", (duplicate_id,))
+            for source in sources:
+                self.save_source(target_id, source, actor)
+            self.db.execute("UPDATE feedback SET event_id = ? WHERE event_id = ?", (target_id, duplicate_id))
+            now = datetime.now(timezone.utc).isoformat()
+            self.db.execute("UPDATE events SET merged_into = ?, updated_at = ? WHERE id = ? OR merged_into = ?",
+                            (target_id, now, duplicate_id, duplicate_id))
+            priority = {"published": 0, "draft": 1, "cancelled": 2}
+            status = max((target["status"], duplicate["status"]), key=priority.__getitem__)
+            self.db.execute("UPDATE events SET status = ?, status_locked = ?, updated_at = ? WHERE id = ?",
+                            (status, max(target["status_locked"], duplicate["status_locked"]), now, target_id))
+            self.log_audit(actor, "merge_event", "event", target_id,
+                           {"duplicate": duplicate, "sources": sources,
+                            "status": {"old": target["status"], "new": status}})
+
     def log_audit(
         self,
         actor: str,
@@ -44,6 +99,8 @@ class ImportService:
         entity_id: str,
         changes: Dict[str, Any],
     ) -> None:
+        if not actor or not actor.strip():
+            raise ValueError("Не указан инициатор изменения")
         now = datetime.now(timezone.utc).isoformat()
         self.db.execute(
             """
@@ -108,7 +165,7 @@ class ImportService:
         org_link = str(org_link_raw).strip() if org_link_raw and str(org_link_raw).strip() else None
 
         price_min, price_max, is_free = parse_price_fields(
-            raw_item.get("price_min", 0),
+            raw_item.get("price_min"),
             raw_item.get("price_max"),
             raw_item.get("is_free"),
         )
@@ -158,9 +215,7 @@ class ImportService:
             confidence = 0.7
         confidence = max(0.0, min(1.0, confidence))
 
-        status = str(raw_item.get("status") or "опубликовано").strip().lower()
-        if status not in VALID_STATUSES:
-            raise ValueError(f"Недопустимый статус '{status}'. Допустимые: {', '.join(sorted(VALID_STATUSES))}")
+        status = normalize_status(raw_item.get("status") or "published")
 
         # Определение спорной карточки (Раздел 6.1: «обязательные поля заполнены, спорные помечены»)
         dispute_reasons: List[str] = []
@@ -171,7 +226,7 @@ class ImportService:
                 dispute_reasons.append("Помечено как спорное источником")
         if confidence < 0.8:
             dispute_reasons.append(f"Низкая уверенность извлечения ({confidence:.2f})")
-        if not is_free and not org_link:
+        if price_min is not None and price_min > 0 and not org_link:
             dispute_reasons.append("Платное событие без ссылки на билеты/организатора (org_link)")
         if len(description) < 20:
             dispute_reasons.append("Слишком краткое описание мероприятия (< 20 символов)")
@@ -186,7 +241,7 @@ class ImportService:
             "venue": venue,
             "source_url": source_url,
         }))
-        dedup_key = str(raw_item.get("dedup_key") or compute_dedup_key(title, date_start, resolved_city, venue))
+        dedup_key = compute_dedup_key(title, date_start, resolved_city, venue)
         event_id = str(raw_item.get("id") or uuid.uuid4())
         now_iso = datetime.now(timezone.utc).isoformat()
         verified_at = str(raw_item.get("verified_at") or now_iso)
@@ -216,8 +271,10 @@ class ImportService:
             "source_type": source_type,
             "source_hash": source_hash,
             "verified_at": verified_at,
+            "_verified_explicit": bool(raw_item.get("verified_at")),
             "confidence": confidence,
             "status": status,
+            "_status_explicit": bool(raw_item.get("status")),
             "dedup_key": dedup_key,
             "is_disputed": is_disputed,
             "dispute_reason": dispute_reason,
@@ -264,10 +321,41 @@ class ImportService:
         Идемпотентное сохранение нормализованного события.
         Возвращает 'added' | 'updated' | 'unchanged'.
         """
-        existing = self.db.fetchone(
-            "SELECT * FROM events WHERE source_hash = ? OR id = ? OR dedup_key = ?",
-            (norm["source_hash"], norm["id"], norm["dedup_key"]),
+        with self.db.transaction():
+            self.db.lock_events()
+            return self._upsert_normalized_event(norm, raw_event_id, actor)
+
+    def _upsert_normalized_event(self, norm, raw_event_id, actor):
+        matches = self.db.fetchall(
+            """SELECT * FROM events WHERE id = ? OR
+               (merged_into IS NULL AND (dedup_key = ? OR id IN
+                (SELECT event_id FROM event_sources WHERE source_hash = ? AND source_url = ?)))
+               ORDER BY created_at, id""",
+            (norm["id"], norm["dedup_key"], norm["source_hash"], norm["source_url"]),
         )
+        targets = {}
+        for match in matches:
+            while match.get("merged_into"):
+                match = self.db.fetchone("SELECT * FROM events WHERE id = ?", (match["merged_into"],))
+            targets[match["id"]] = match
+        existing = next(iter(targets.values()), None)
+        if existing:
+            for other_id in list(targets)[1:]:
+                self.merge_events(existing["id"], other_id, actor)
+            existing = self.db.fetchone("SELECT * FROM events WHERE id = ?", (existing["id"],))
+            norm["id"] = existing["id"]
+            if existing["status_locked"] or not norm.get("_status_explicit", True):
+                norm["status"] = existing["status"]
+            if existing["status_locked"]:
+                norm["is_disputed"] = bool(existing["is_disputed"])
+                norm["dispute_reason"] = existing["dispute_reason"]
+            source_changed = self.save_source(existing["id"], norm, actor)
+            # The legacy fields consistently refer to the primary source.
+            if norm["source_url"] != existing["source_url"]:
+                for field in ("source_url", "source_type", "source_hash", "verified_at"):
+                    norm[field] = existing[field]
+        else:
+            source_changed = False
         now_iso = datetime.now(timezone.utc).isoformat()
         tags_json = json.dumps(norm["tags"], ensure_ascii=False)
 
@@ -325,79 +413,37 @@ class ImportService:
                     now_iso,
                 ),
             )
+            self.save_source(norm["id"], norm, actor)
             self.log_audit(
                 actor=actor,
                 action="create_event",
                 entity_type="event",
                 entity_id=norm["id"],
-                changes={"title": norm["title"], "status": norm["status"], "city": norm["city"]},
+                changes={k: v for k, v in norm.items() if not k.startswith("_")},
             )
             return "added"
 
         # Проверяем, изменились ли содержательные поля (идемпотентность при повторном импорте того же файла)
-        compare_fields = [
-            ("title", existing["title"], norm["title"]),
-            ("category", existing["category"], norm["category"]),
-            ("date_start", existing["date_start"], norm["date_start"]),
-            ("date_end", existing.get("date_end"), norm["date_end"]),
-            ("city", existing["city"], norm["city"]),
-            ("venue", existing["venue"], norm["venue"]),
-            ("address", existing["address"], norm["address"]),
-            ("description", existing["description"], norm["description"]),
-            ("price_min", int(existing.get("price_min") or 0), norm["price_min"]),
-            ("price_max", int(existing.get("price_max") or 0), norm["price_max"]),
-            ("is_free", bool(existing.get("is_free")), norm["is_free"]),
-            ("age_limit", int(existing.get("age_limit") or 0), norm["age_limit"]),
-            ("status", existing["status"], norm["status"]),
-        ]
+        values = {k: v for k, v in norm.items() if not k.startswith("_") and k != "id"}
+        values["tags"] = tags_json
+        for flag in ("is_free", "is_disputed"):
+            values[flag] = int(values[flag])
+        # Automatically generated verification timestamps do not make a repeat an update.
+        compare_fields = [(key, existing.get(key), value) for key, value in values.items()
+                          if key != "verified_at" or norm.get("_verified_explicit")]
         diff = {field: {"old": old_v, "new": new_v} for field, old_v, new_v in compare_fields if old_v != new_v}
         if not diff:
-            return "unchanged"
+            if source_changed:
+                self.db.execute("UPDATE events SET updated_at = ? WHERE id = ?", (now_iso, existing["id"]))
+            return "updated" if source_changed else "unchanged"
 
         target_id = str(existing["id"])
+        # Keep the primary source's raw pointer consistent with legacy source fields.
+        values["raw_event_id"] = existing.get("raw_event_id") or raw_event_id
+        values["updated_at"] = now_iso
         self.db.execute(
-            """
-            UPDATE events SET
-                raw_event_id = ?, title = ?, normalized_title = ?, category = ?, tags = ?,
-                date_start = ?, date_end = ?, duration_min = ?, city = ?, venue = ?, address = ?,
-                lat = ?, lon = ?, description = ?, price_min = ?, price_max = ?, is_free = ?,
-                age_limit = ?, language = ?, org_link = ?, source_url = ?, source_type = ?,
-                verified_at = ?, confidence = ?, status = ?, dedup_key = ?,
-                is_disputed = ?, dispute_reason = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            (
-                raw_event_id or existing.get("raw_event_id"),
-                norm["title"],
-                norm["normalized_title"],
-                norm["category"],
-                tags_json,
-                norm["date_start"],
-                norm["date_end"],
-                norm["duration_min"],
-                norm["city"],
-                norm["venue"],
-                norm["address"],
-                norm["lat"],
-                norm["lon"],
-                norm["description"],
-                norm["price_min"],
-                norm["price_max"],
-                1 if norm["is_free"] else 0,
-                norm["age_limit"],
-                norm["language"],
-                norm["org_link"],
-                norm["source_url"],
-                norm["source_type"],
-                norm["verified_at"],
-                norm["confidence"],
-                norm["status"],
-                norm["dedup_key"],
-                1 if norm["is_disputed"] else 0,
-                norm["dispute_reason"],
-                now_iso,
-                target_id,
-            ),
+            "UPDATE events SET " + ", ".join(f"{key} = ?" for key in values) + " WHERE id = ?",
+            (*values.values(), target_id),
         )
         self.log_audit(
             actor=actor,
@@ -426,8 +472,10 @@ class ImportService:
         for idx, raw_item in enumerate(records, start=1):
             try:
                 norm = self._validate_and_normalize(raw_item, default_source_type=source_type)
-                raw_id = self._save_raw_event(raw_item, source_type, source_file, norm["source_hash"])
-                outcome = self.upsert_normalized_event(norm, raw_id, actor=actor)
+                with self.db.transaction():
+                    self.db.lock_events()
+                    raw_id = self._save_raw_event(raw_item, source_type, source_file, norm["source_hash"])
+                    outcome = self.upsert_normalized_event(norm, raw_id, actor=actor)
                 if outcome == "added":
                     added += 1
                 elif outcome == "updated":
@@ -537,29 +585,76 @@ class ImportService:
         return self.import_records(records, source_file=filename, actor=actor, source_type="импорт")
 
     def create_event_manual(self, data: Dict[str, Any], actor: str = "moderator") -> Tuple[str, EventRecord]:
+        with self.db.transaction():
+            self.db.lock_events()
+            return self._create_event_manual(data, actor)
+
+    def _create_event_manual(self, data, actor):
         data = dict(data)
         data["source_type"] = "ручной ввод"
         norm = self._validate_and_normalize(data, default_source_type="ручной ввод")
         raw_id = self._save_raw_event(data, "ручной ввод", "manual_admin_input", norm["source_hash"])
         outcome = self.upsert_normalized_event(norm, raw_id, actor=actor)
         row = self.db.fetchone(
-            "SELECT * FROM events WHERE source_hash = ? OR id = ?",
-            (norm["source_hash"], norm["id"]),
+            "SELECT * FROM events WHERE id = ?",
+            (norm["id"],),
         )
-        return outcome, EventRecord.from_row(row)
+        record = EventRecord.from_row(row)
+        record.sources = self.list_sources(record.id)
+        return outcome, record
 
     def update_event_status(self, event_id: str, new_status: str, actor: str = "moderator") -> EventRecord:
-        new_status = new_status.strip().lower()
-        if new_status not in VALID_STATUSES:
-            raise ValueError(f"Недопустимый статус '{new_status}'. Допустимые: {', '.join(sorted(VALID_STATUSES))}")
+        with self.db.transaction():
+            self.db.lock_events()
+            return self._update_event_status(event_id, new_status, actor)
+
+    def update_event_fields(self, event_id: str, changes: Dict[str, Any], actor: str) -> EventRecord:
+        """Validate editable fields and persist them with the standard audit trail."""
+        editable = set(self.REQUIRED_FIELDS) | {"date_end", "duration_min", "price_min", "price_max", "is_free",
+                    "age_limit", "language", "org_link", "tags", "lat", "lon"}
+        unsupported = set(changes) - editable
+        if unsupported:
+            raise ValueError(f"Недопустимые для редактирования поля: {', '.join(sorted(unsupported))}")
+        with self.db.transaction():
+            self.db.lock_events()
+            previous = self.db.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
+            if not previous:
+                raise LookupError("Событие не найдено")
+            payload = dict(previous)
+            payload["tags"] = json.loads(payload.get("tags") or "[]")
+            payload.update({k: v for k, v in changes.items() if k in editable})
+            payload["source_type"] = previous["source_type"]
+            norm = self._validate_and_normalize(payload, default_source_type=previous["source_type"])
+            fields = ("title", "normalized_title", "category", "tags", "date_start", "date_end", "duration_min",
+                      "city", "venue", "address", "lat", "lon", "description", "price_min", "price_max",
+                      "is_free", "age_limit", "language", "org_link", "status")
+            values = {k: norm[k] for k in fields}
+            values["tags"] = json.dumps(values["tags"], ensure_ascii=False)
+            values["is_free"] = int(values["is_free"])
+            diff = {k: {"old": previous[k], "new": values[k]} for k in fields if previous[k] != values[k]}
+            if diff:
+                values["updated_at"] = datetime.now(timezone.utc).isoformat()
+                self.db.execute("UPDATE events SET " + ", ".join(f"{k} = ?" for k in values) + " WHERE id = ?",
+                                (*values.values(), event_id))
+                self.log_audit(actor, "update_event", "event", event_id, diff)
+            row = self.db.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
+            record = EventRecord.from_row(row)
+            record.sources = self.list_sources(event_id)
+            return record
+
+    def _update_event_status(self, event_id, new_status, actor):
+        new_status = normalize_status(new_status)
         existing = self.db.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
         if not existing:
             raise LookupError(f"Событие с ID '{event_id}' не найдено")
 
+        while existing.get("merged_into"):
+            existing = self.db.fetchone("SELECT * FROM events WHERE id = ?", (existing["merged_into"],))
+        event_id = existing["id"]
         old_status = existing["status"]
         now_iso = datetime.now(timezone.utc).isoformat()
         self.db.execute(
-            "UPDATE events SET status = ?, is_disputed = 0, updated_at = ? WHERE id = ?",
+            "UPDATE events SET status = ?, status_locked = 1, is_disputed = 0, dispute_reason = NULL, updated_at = ? WHERE id = ?",
             (new_status, now_iso, event_id),
         )
         self.log_audit(
@@ -567,10 +662,15 @@ class ImportService:
             action="change_status",
             entity_type="event",
             entity_id=event_id,
-            changes={"status": {"old": old_status, "new": new_status}},
+            changes={"status": {"old": old_status, "new": new_status},
+                     "status_locked": {"old": existing["status_locked"], "new": 1},
+                     "is_disputed": {"old": existing["is_disputed"], "new": 0},
+                     "dispute_reason": {"old": existing["dispute_reason"], "new": None}},
         )
         updated_row = self.db.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
-        return EventRecord.from_row(updated_row)
+        record = EventRecord.from_row(updated_row)
+        record.sources = self.list_sources(record.id)
+        return record
 
     def reprocess_raw_events(self, actor: str = "system_reprocessor") -> int:
         """Переигрывание нормализации по сохранённым сырым записям без повторного сбора (Раздел 6.1 ТЗ)."""

@@ -172,42 +172,42 @@ def resolve_category(raw_cat: str, db: Optional[Database] = None) -> Optional[st
     return None
 
 
-def parse_price_fields(raw_min: Any, raw_max: Any = None, raw_is_free: Any = None) -> Tuple[int, int, bool]:
-    """Нормализация цен из чисел или текстовых строк ('вход свободный', 'бесплатно', 'от 300 до 800 ₽')."""
-    if isinstance(raw_is_free, str):
-        is_free_flag = raw_is_free.strip().lower() in ("true", "1", "yes", "да", "бесплатно")
-    else:
-        is_free_flag = bool(raw_is_free) if raw_is_free is not None else False
+def parse_price_fields(raw_min: Any, raw_max: Any = None, raw_is_free: Any = None) -> Tuple[Optional[int], Optional[int], bool]:
+    """Missing/unrecognised prices stay unknown; only explicit zero/free means free."""
+    free = (raw_is_free.strip().lower() in ("true", "1", "yes", "да", "бесплатно")
+            if isinstance(raw_is_free, str) else bool(raw_is_free))
 
-    if isinstance(raw_min, str):
-        low = raw_min.strip().lower()
-        if any(w in low for w in ("бесплатн", "свободн", "free", "0 руб")):
-            return 0, 0, True
-        nums = [int(x) for x in re.findall(r"\d+", low)]
-        if len(nums) >= 2:
-            return min(nums), max(nums), False
-        elif len(nums) == 1:
-            p_min = nums[0]
-            p_max = int(raw_max) if raw_max not in (None, "") and str(raw_max).isdigit() else p_min
-            return p_min, max(p_min, p_max), (p_min == 0 and p_max == 0)
+    def amounts(value):
+        if value is None or str(value).strip() == "":
+            return []
+        text = str(value).strip().lower().replace("\u00a0", " ")
+        if re.search(r"-\s*\d", text):
+            # A spaced dash between prices is a range, a leading minus is invalid.
+            if text.startswith("-") or re.search(r"(?:от|до)\s*-", text):
+                raise ValueError("Цена не может быть отрицательной")
+        if isinstance(value, (int, float)):
+            if value < 0 or not float(value).is_integer():
+                raise ValueError("Цена должна быть неотрицательным целым числом")
+            return [int(value)]
+        text = re.sub(r"(?<=\d) (?=\d{3}(?:\D|$))", "", text)
+        if re.search(r"\d[.,]\d", text):
+            raise ValueError("Цена должна быть целым числом")
+        return [int(n) for n in re.findall(r"\d+", text)]
 
-    try:
-        p_min = int(float(raw_min)) if raw_min not in (None, "") else 0
-    except (ValueError, TypeError):
-        p_min = 0
-
-    try:
-        p_max = int(float(raw_max)) if raw_max not in (None, "") else p_min
-    except (ValueError, TypeError):
-        p_max = p_min
-
-    if p_min < 0 or p_max < 0:
-        raise ValueError("Цена не может быть отрицательной")
-
-    if p_max < p_min:
-        p_max = p_min
-
-    if is_free_flag or (p_min == 0 and p_max == 0):
+    low_text = str(raw_min or "").lower()
+    explicit_free = any(word in low_text for word in ("бесплатн", "свободн", "free"))
+    mins, maxs = amounts(raw_min), amounts(raw_max)
+    if free or explicit_free:
+        if any(n > 0 for n in mins + maxs):
+            raise ValueError("Бесплатный вход противоречит положительной цене")
+        return 0, 0, True
+    p_min = min(mins) if mins else None
+    p_max = max(maxs) if maxs else (max(mins) if mins else None)
+    if low_text.strip().startswith("до ") and not maxs:
+        p_min = None
+    if p_min is not None and p_max is not None and p_max < p_min:
+        raise ValueError("price_max не может быть меньше price_min")
+    if p_min == 0 and p_max == 0:
         return 0, 0, True
     return p_min, p_max, False
 

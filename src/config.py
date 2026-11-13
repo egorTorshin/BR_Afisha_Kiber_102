@@ -17,10 +17,19 @@ class Settings:
         ).strip()
     )
     admin_user_ids: List[str] = field(default_factory=list)
+    admin_username: str = field(default_factory=lambda: os.getenv("ADMIN_USERNAME", "admin"))
+    admin_password: str = field(default_factory=lambda: os.getenv("ADMIN_PASSWORD", ""))
+    admin_secret: str = field(default_factory=lambda: os.getenv("ADMIN_SECRET", ""))
+    # Set true when the public app is served over HTTPS. Local HTTP stays usable.
+    admin_cookie_secure: bool = field(default_factory=lambda: os.getenv("ADMIN_COOKIE_SECURE", "true").lower() in {"1", "true", "yes", "on"})
     rate_limit_per_minute: int = field(default_factory=lambda: int(os.getenv("RATE_LIMIT_PER_MINUTE", "30")))
     subscription_retention_days: int = field(default_factory=lambda: int(os.getenv("SUBSCRIPTION_RETENTION_DAYS", "180")))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO").upper())
     reference_date_str: str = field(default_factory=lambda: os.getenv("REFERENCE_DATE", "2026-11-13").strip())
+    cors_origins: List[str] = field(default_factory=lambda: [
+        value.strip() for value in os.getenv("CORS_ORIGINS", "").split(",") if value.strip()
+    ])
+    public_cache_max_age: int = field(default_factory=lambda: max(0, int(os.getenv("PUBLIC_CACHE_MAX_AGE", "60"))))
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     migrations_dir: Path = field(default_factory=lambda: BASE_DIR / "migrations")
 

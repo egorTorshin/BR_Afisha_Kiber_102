@@ -218,7 +218,7 @@ class BotRouter:
             )
 
     def _open_card(self, uid: str, event_id_or_prefix: str) -> BotResponse:
-        ev = self.search_service.get_event_by_id(event_id_or_prefix)
+        ev = self.search_service.get_event_by_id(event_id_or_prefix, include_drafts=self.is_admin(uid))
         if not ev:
             return self._build_main_menu_response(
                 uid,
@@ -474,7 +474,7 @@ class BotRouter:
 
         if cmd == "/admin_disputed":
             rows = self.db.fetchall(
-                "SELECT id, title, city, status, dispute_reason FROM events WHERE is_disputed = 1 ORDER BY updated_at DESC LIMIT 10"
+                "SELECT id, title, city, status, dispute_reason FROM events WHERE is_disputed = 1 AND merged_into IS NULL ORDER BY updated_at DESC LIMIT 10"
             )
             if not rows:
                 return BotResponse(text="✅ В очереди модерации нет спорных карточек.")
