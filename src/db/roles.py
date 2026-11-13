@@ -8,12 +8,17 @@ from src.db.connection import Database
 ROLE_TABLES = {
     "afisha_api": {
         "SELECT": ("cities", "categories", "venues", "events", "event_sources", "raw_events",
-                   "import_reports", "feedback", "audit_log", "admin_sessions", "request_limits"),
+                   "import_reports", "feedback", "audit_log", "admin_sessions", "request_limits",
+                   "subscriptions", "agent_dialogue_states", "agent_traces", "agent_sessions",
+                   "agent_action_receipts"),
         "INSERT": ("events", "event_sources", "raw_events", "import_reports", "feedback",
-                   "audit_log", "admin_sessions", "request_limits"),
+                   "audit_log", "admin_sessions", "request_limits", "subscriptions",
+                   "agent_dialogue_states", "agent_traces", "agent_sessions",
+                   "agent_action_receipts"),
         "UPDATE": ("events", "event_sources", "raw_events", "feedback", "admin_sessions",
-                   "request_limits"),
-        "DELETE": ("event_sources",),
+                   "request_limits", "subscriptions", "agent_dialogue_states", "agent_sessions"),
+        "DELETE": ("event_sources", "agent_dialogue_states", "agent_sessions",
+                   "agent_action_receipts"),
     },
     "afisha_bot": {
         "SELECT": ("cities", "categories", "venues", "events", "event_sources", "raw_events",
@@ -25,10 +30,12 @@ ROLE_TABLES = {
     },
     "afisha_maintenance": {
         "SELECT": ("events", "raw_events", "subscriptions", "feedback", "audit_log",
-                   "import_reports", "admin_sessions", "request_limits"),
+                   "import_reports", "admin_sessions", "request_limits", "agent_dialogue_states",
+                   "agent_sessions", "agent_action_receipts"),
         "UPDATE": ("events",),
         "DELETE": ("raw_events", "subscriptions", "feedback", "audit_log", "import_reports",
-                   "admin_sessions", "request_limits"),
+                   "admin_sessions", "request_limits", "agent_dialogue_states", "agent_sessions",
+                   "agent_action_receipts"),
     },
 }
 

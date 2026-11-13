@@ -1,0 +1,74 @@
+services:
+  router:
+    build:
+      context: .
+      dockerfile: Dockerfile.router
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 2g
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    networks:
+      - ai-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+
+  local-llm:
+    image: ghcr.io/ggml-org/llama.cpp:server@sha256:e3032ea0712da96dec820c770626385de4322dd06619fb5829256a504bbc9375
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 5g
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    command: ["--model", "/models/qwen2.5-3b-instruct-q4_k_m.gguf", "--alias", "qwen2.5-3b-local", "--host", "0.0.0.0", "--port", "8080", "--ctx-size", "4096", "--batch-size", "256", "--ubatch-size", "128", "--parallel", "1", "--n-gpu-layers", "0", "--n-predict", "512", "--jinja"]
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    networks:
+      - ai-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+
+  api:
+    mem_limit: 1g
+    depends_on:
+      router:
+        condition: service_healthy
+      local-llm:
+        condition: service_healthy
+    networks:
+      default: {}
+      ai-internal: {}
+    environment:
+      AI_MODE: local-ai
+      JEV_ENABLED: "true"
+      JEV_ENDPOINT: http://router:8001/decide
+      JEV_MODEL: qwen2.5-1.5b-router
+      JEV_TIMEOUT_SECONDS: ${JEV_TIMEOUT_SECONDS:-15}
+      LOCAL_LLM_BASE_URL: http://local-llm:8080/v1
+      LIGHT_LLM_MODEL: qwen2.5-3b-local
+      HEAVY_LLM_MODEL: qwen2.5-3b-local
+      LIGHT_LLM_TIMEOUT_SECONDS: ${LIGHT_LLM_TIMEOUT_SECONDS:-25}
+      HEAVY_LLM_TIMEOUT_SECONDS: ${HEAVY_LLM_TIMEOUT_SECONDS:-90}
+      LIGHT_LLM_MAX_TOKENS: ${LIGHT_LLM_MAX_TOKENS:-384}
+      HEAVY_LLM_MAX_TOKENS: ${HEAVY_LLM_MAX_TOKENS:-512}
+
+networks:
+  ai-internal:
+    internal: true

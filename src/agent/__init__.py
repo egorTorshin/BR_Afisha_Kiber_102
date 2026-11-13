@@ -1,1 +1,1 @@
-"""Contracts for the future AI agent; no runtime integrations live here."""
+"""Typed, policy-constrained event assistant runtime."""

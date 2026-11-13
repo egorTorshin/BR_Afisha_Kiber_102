@@ -229,7 +229,7 @@ def test_upgrade_existing_database_preserves_data_sources_and_ids(empty_db, tmp_
     insert_legacy(db, event(), event_id="legacy_one", raw_id="raw_one")
     insert_legacy(db, event(source_url="https://example.com/two", status="черновик"), event_id="legacy_two", raw_id="raw_two")
     insert_legacy(db, event(title="Бесплатный вход", price_min=0), event_id="legacy_free", raw_id="raw_free")
-    assert apply_migrations(db, MIGRATIONS) == 2
+    assert apply_migrations(db, MIGRATIONS) == 3
     assert apply_migrations(db, MIGRATIONS) == 0
     assert len(db.fetchall("SELECT * FROM events")) == 3  # Old snapshots and IDs retained.
     assert len(db.fetchall("SELECT * FROM events WHERE merged_into IS NULL")) == 2
@@ -263,7 +263,7 @@ def test_failed_migration_is_atomic(empty_db, tmp_path, monkeypatch):
     assert len(db.fetchall("SELECT * FROM schema_migrations")) == 1
     assert db.fetchone("SELECT price_min, status FROM events WHERE id = 'old'") == {"price_min": 0, "status": "опубликовано"}
     monkeypatch.setattr(migrations, "_backfill_admin_data", original)
-    assert apply_migrations(db, MIGRATIONS) == 2
+    assert apply_migrations(db, MIGRATIONS) == 3
 
 
 

@@ -47,6 +47,9 @@ def prune(db: Database, settings: Settings) -> dict[str, int]:
             "audit_log": 0,
             "sessions": 0,
             "rate_limits": 0,
+            "agent_dialogues": 0,
+            "agent_sessions": 0,
+            "agent_action_receipts": 0,
         }
         db.execute(
             "UPDATE events SET raw_event_id = NULL WHERE raw_event_id IN "
@@ -60,6 +63,15 @@ def prune(db: Database, settings: Settings) -> dict[str, int]:
         )
         result["rate_limits"] = db.execute(
             "DELETE FROM request_limits WHERE window_start < ?", (int(now.timestamp()) - 3600,)
+        )
+        result["agent_dialogues"] = db.execute(
+            "DELETE FROM agent_dialogue_states WHERE expires_at < ?", (now.isoformat(),)
+        )
+        result["agent_sessions"] = db.execute(
+            "DELETE FROM agent_sessions WHERE expires_at < ?", (now.isoformat(),)
+        )
+        result["agent_action_receipts"] = db.execute(
+            "DELETE FROM agent_action_receipts WHERE expires_at < ?", (now.isoformat(),)
         )
     return result
 

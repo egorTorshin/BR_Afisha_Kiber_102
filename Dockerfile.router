@@ -1,0 +1,17 @@
+FROM ghcr.io/ggml-org/llama.cpp:server@sha256:e3032ea0712da96dec820c770626385de4322dd06619fb5829256a504bbc9375
+
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd --uid 10001 --create-home --shell /usr/sbin/nologin routeruser
+RUN python3 -m venv /router-venv
+COPY requirements-router.lock.txt /app/requirements-router.lock.txt
+RUN /router-venv/bin/pip install --no-cache-dir -r /app/requirements-router.lock.txt
+WORKDIR /app
+COPY --chown=routeruser:routeruser src/__init__.py /app/src/__init__.py
+COPY --chown=routeruser:routeruser src/config.py /app/src/config.py
+COPY --chown=routeruser:routeruser src/agent /app/src/agent
+ENV PYTHONPATH=/app \
+    LLAMA_SERVER_BIN=/app/llama-server \
+    ROUTER_MODEL_PATH=/models/qwen2.5-1.5b-instruct-q4_k_m.gguf
+USER routeruser
+ENTRYPOINT ["/router-venv/bin/python", "-m", "src.agent.router_service"]

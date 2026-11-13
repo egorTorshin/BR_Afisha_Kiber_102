@@ -12,3 +12,6 @@ htmlcov
 frontend/node_modules
 frontend/.next
 frontend/.env*
+models
+.runtime
+KIBER_102_HACKATHON-ai-agent

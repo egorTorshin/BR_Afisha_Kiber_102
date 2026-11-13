@@ -108,6 +108,10 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
                     elif path == "/feedback":
                         quotas = [("feedback:visitor", visitor, 10, 60),
                                   ("feedback:ip", client_ip, 200, 60)]
+                    elif path == "/api/v1/agent/chat":
+                        identity = request.cookies.get("agent_session") or visitor
+                        quotas = [("agent-chat:session", identity, 30, 60),
+                                  ("agent-chat:ip", client_ip, 300, 60)]
                     elif path.startswith("/api/v1/admin/"):
                         identity = request.cookies.get("admin_session") or visitor
                         limit = 2 if path == "/api/v1/admin/import" else 30
@@ -146,7 +150,9 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
             request_id_ctx.reset(token)
 
     from src.http.admin import create_admin_router
+    from src.http.agent import create_agent_router
     from src.http.public import create_public_router
     app.include_router(create_admin_router(database, settings, auth))
+    app.include_router(create_agent_router(database, settings, auth))
     app.include_router(create_public_router(database))
     return app

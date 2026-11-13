@@ -12,3 +12,6 @@ build/
 *.egg-info/
 logs/
 data/
+models/
+.runtime/
+/KIBER_102_HACKATHON-ai-agent/
