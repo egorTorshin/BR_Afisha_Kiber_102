@@ -43,6 +43,21 @@ def format_datetime_ru(iso_str: Optional[str]) -> str:
         return iso_str
 
 
+def format_datetime(iso_str: Optional[str], language: str = "ru") -> str:
+    if language == "ru":
+        return format_datetime_ru(iso_str)
+    if not iso_str:
+        return "not specified" if language == "en" else "күрһетелмәгән"
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        if language == "en":
+            return dt.strftime("%d %b %Y, %H:%M")
+        months = ["ғинуар", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+        return f"{dt.day} {months[dt.month - 1]} {dt.year}, {dt.strftime('%H:%M')}"
+    except ValueError:
+        return iso_str
+
+
 def format_price_ru(ev: EventRecord) -> str:
     if ev.is_free:
         return "🆓 Бесплатно"
@@ -57,6 +72,24 @@ def format_price_ru(ev: EventRecord) -> str:
     if ev.price_min == 0 and ev.price_max > 0:
         return f"до {ev.price_max} ₽"
     return f"от {ev.price_min} до {ev.price_max} ₽"
+
+
+def format_price(ev: EventRecord, language: str = "ru") -> str:
+    if language == "ru":
+        return format_price_ru(ev)
+    if ev.is_free:
+        return "🆓 Free" if language == "en" else "🆓 Бушлай"
+    if ev.price_min is None and ev.price_max is None:
+        return "Price to be confirmed" if language == "en" else "Хаҡы аныҡлана"
+    prefix_from = "from" if language == "en" else ""
+    prefix_to = "up to" if language == "en" else "тиклем"
+    if ev.price_min is None:
+        return f"{prefix_to} {ev.price_max} ₽"
+    if ev.price_max is None:
+        return f"{prefix_from} {ev.price_min} ₽".strip()
+    if ev.price_min == ev.price_max:
+        return f"{ev.price_min} ₽"
+    return f"{ev.price_min}–{ev.price_max} ₽"
 
 
 def format_filter_summary_block(filters: Optional[SearchFilters], matching_count: Optional[int] = None) -> str:
@@ -137,7 +170,7 @@ def format_help_message() -> str:
     )
 
 
-def format_event_card(ev: EventRecord) -> str:
+def format_event_card(ev: EventRecord, language: str = "ru") -> str:
     """
     Полная карточка события (Раздел 6.2 ТЗ):
     название, категория, дата и время, город и площадка, адрес, описание,
@@ -151,38 +184,43 @@ def format_event_card(ev: EventRecord) -> str:
     elif ev.status in ("draft", "черновик"):
         lines.append("📝 <b>СТАТУС: ЧЕРНОВИК (НА МОДЕРАЦИИ)</b>\n")
 
+    labels = {
+        "ru": ("Категория", "Дата и время", "Город и площадка", "Адрес", "От вас", "Стоимость", "Возрастное ограничение", "Язык", "Теги", "Описание", "Билеты / Организатор", "Источник", "км"),
+        "en": ("Category", "Date and time", "City and venue", "Address", "From you", "Price", "Age rating", "Language", "Tags", "Description", "Tickets / Organiser", "Source", "km"),
+        "ba": ("Категория", "Көн һәм ваҡыт", "Ҡала һәм майҙансыҡ", "Адрес", "Һеҙҙән", "Хаҡы", "Йәш сикләүе", "Тел", "Тегтар", "Тасуирлама", "Билеттар / Ойоштороусы", "Сығанаҡ", "км"),
+    }.get(language, None) or ()
+    category_l, date_l, venue_l, address_l, distance_l, price_l, age_l, lang_l, tags_l, desc_l, tickets_l, source_l, km_l = labels
     lines.append(f"📌 <b>{html.escape(ev.title)}</b>")
-    lines.append(f"🏷 <b>Категория:</b> {category_badge(ev.category)} • <b>{ev.age_limit}+</b>")
+    lines.append(f"🏷 <b>{category_l}:</b> {category_badge(ev.category)} • <b>{ev.age_limit}+</b>")
 
-    date_line = format_datetime_ru(ev.date_start)
+    date_line = format_datetime(ev.date_start, language)
     if ev.date_end and ev.date_end[:10] != ev.date_start[:10]:
-        date_line += f" — до {format_datetime_ru(ev.date_end)}"
+        date_line += f" — {format_datetime(ev.date_end, language)}"
     elif ev.duration_min:
         date_line += f" (⏱ {ev.duration_min} мин)"
-    lines.append(f"📅 <b>Дата и время:</b> {date_line}")
+    lines.append(f"📅 <b>{date_l}:</b> {date_line}")
 
-    lines.append(f"🏛 <b>Город и площадка:</b> г. {html.escape(ev.city)}, {html.escape(ev.venue)}")
-    lines.append(f"📍 <b>Адрес:</b> {html.escape(ev.address)}")
+    lines.append(f"🏛 <b>{venue_l}:</b> {html.escape(ev.city)}, {html.escape(ev.venue)}")
+    lines.append(f"📍 <b>{address_l}:</b> {html.escape(ev.address)}")
     if ev.distance_km is not None:
-        lines.append(f"📏 <b>От вас:</b> {ev.distance_km:.1f} км")
-    lines.append(f"💳 <b>Стоимость:</b> {format_price_ru(ev)}")
-    lines.append(f"🔞 <b>Возрастное ограничение:</b> {ev.age_limit}+")
+        lines.append(f"📏 <b>{distance_l}:</b> {ev.distance_km:.1f} {km_l}")
+    lines.append(f"💳 <b>{price_l}:</b> {format_price(ev, language)}")
+    lines.append(f"🔞 <b>{age_l}:</b> {ev.age_limit}+")
     if ev.language:
-        lines.append(f"🗣 <b>Язык:</b> {html.escape(ev.language)}")
+        lines.append(f"🗣 <b>{lang_l}:</b> {html.escape(ev.language)}")
     if ev.tags:
         tags_str = ", ".join(f"#{html.escape(t)}" for t in ev.tags[:6])
-        lines.append(f"🏷 <b>Теги:</b> {tags_str}")
+        lines.append(f"🏷 <b>{tags_l}:</b> {tags_str}")
 
-    lines.append(f"\n📖 <b>Описание:</b>\n{html.escape(ev.description)}")
+    lines.append(f"\n📖 <b>{desc_l}:</b>\n{html.escape(ev.description)}")
 
-    lines.append(f"\n🔗 <b>Источник:</b> {html.escape(ev.source_url)}")
     if ev.org_link:
-        lines.append(f"🎟 <b>Билеты / Организатор:</b> {html.escape(ev.org_link)}")
+        lines.append(f"🎟 <b>{tickets_l}:</b> {html.escape(ev.org_link)}")
+    lines.append(f"🔗 <b>{source_l}:</b> {html.escape(ev.source_url)}")
 
     if ev.is_disputed and ev.dispute_reason:
         lines.append(f"\n🔎 <i>Отметка модерации: {html.escape(ev.dispute_reason)}</i>")
 
-    lines.append(f"\n<code>Прямая команда: /event_{ev.id}</code>")
     return "\n".join(lines)
 
 
@@ -191,32 +229,32 @@ def format_search_results(
     total: int,
     filters: SearchFilters,
     empty_explanation: Optional[str] = None,
+    language: str = "ru",
 ) -> str:
     if total == 0 or not events:
-        return html.escape(empty_explanation) if empty_explanation else "По вашему запросу подходящих событий не найдено."
+        default_empty = {"ru": "По вашему запросу подходящих событий не найдено.", "en": "No matching events were found.", "ba": "Ярашлы саралар табылманы."}[language]
+        return html.escape(empty_explanation) if empty_explanation else default_empty
 
     start_num = filters.offset + 1
     end_num = filters.offset + len(events)
     total_pages = max(1, (total + filters.limit - 1) // filters.limit)
     curr_page = (filters.offset // filters.limit) + 1
 
-    header = (
-        f"🔎 <b>Найдено событий: {total}</b>  <i>(стр. {curr_page} из {total_pages}, показаны {start_num}–{end_num})</i>\n"
-        f"<blockquote>Условия: {html.escape(filters.describe_human())}</blockquote>"
-    )
+    found = {"ru": "Найдено событий", "en": "Events found", "ba": "Саралар табылды"}[language]
+    header = f"🔎 <b>{found}: {total}</b>  <i>({curr_page}/{total_pages}, {start_num}–{end_num})</i>"
     items: List[str] = [header]
     for idx, ev in enumerate(events, start=start_num):
-        price_str = format_price_ru(ev)
-        dt_str = format_datetime_ru(ev.date_start)
+        price_str = format_price(ev, language)
+        dt_str = format_datetime(ev.date_start, language)
         badge = category_badge(ev.category)
         items.append(
             f"<b>{idx}. {html.escape(ev.title)}</b> ({ev.age_limit}+)\n"
             f"   {badge} • 💳 <b>{price_str}</b>\n"
             f"   📅 {dt_str}\n"
             f"   📍 г. {html.escape(ev.city)}, {html.escape(ev.venue)}"
-            + (f" • {ev.distance_km:.1f} км от вас" if ev.distance_km is not None else "")
+            + ((f" • {ev.distance_km:.1f} km away" if language == "en" else f" • {ev.distance_km:.1f} км") if ev.distance_km is not None else "")
         )
-    items.append("👇 <i>Выберите событие кнопкой ниже для просмотра карточки и ссылок на билеты:</i>")
+    items.append({"ru": "👇 <i>Выберите событие кнопкой ниже:</i>", "en": "👇 <i>Choose an event below:</i>", "ba": "👇 <i>Түбәндә сараны һайлағыҙ:</i>"}[language])
     return "\n\n".join(items)
 
 

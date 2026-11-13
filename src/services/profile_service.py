@@ -51,3 +51,7 @@ class ProfileService:
         params.extend([self._now(), str(user_id)])
         self.db.execute(f"UPDATE bot_profiles SET {', '.join(fields)} WHERE user_id = ?", params)
         return self.get(user_id) or {}
+
+    def delete(self, user_id: str) -> int:
+        """Delete the consent-based bot profile and all its personal fields."""
+        return self.db.execute("DELETE FROM bot_profiles WHERE user_id = ?", (str(user_id),))

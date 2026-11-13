@@ -51,12 +51,7 @@ class TelegramPollingRunner:
                 json={"drop_pending_updates": False},
             )
             commands = [
-                {"command": "start", "description": "🏠 Главное меню и фильтры"},
-                {"command": "search", "description": "🔎 Показать найденные события"},
-                {"command": "subscriptions", "description": "🔔 Мои подписки"},
-                {"command": "unsubscribe", "description": "🔕 Отписаться от всех рассылок"},
-                {"command": "cancel", "description": "🔄 Сбросить фильтры"},
-                {"command": "help", "description": "ℹ️ Справка и примеры запросов"},
+                {"command": "start", "description": "🏠 Начать работу с ботом"},
             ]
             await client.post(f"{self.base_url}/setMyCommands", json={"commands": commands})
             me_resp = await client.get(f"{self.base_url}/getMe")

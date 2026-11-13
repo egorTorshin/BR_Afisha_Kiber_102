@@ -11,6 +11,7 @@ from src.bot.formatter import (
     format_subscriptions_list,
     format_welcome_message,
     format_datetime_ru,
+    format_datetime,
 )
 from src.bot.keyboards import (
     agent_results_keyboard,
@@ -18,6 +19,7 @@ from src.bot.keyboards import (
     categories_keyboard,
     cities_keyboard,
     dates_keyboard,
+    delete_account_keyboard,
     event_card_keyboard,
     main_menu_keyboard,
     prices_keyboard,
@@ -35,6 +37,7 @@ from src.bot.keyboards import (
     profile_keyboard,
     remove_reply_keyboard,
 )
+from src.bot.i18n import t
 from src.config import Settings
 from src.db.connection import Database
 from src.models.schemas import SearchFilters
@@ -92,6 +95,10 @@ class BotRouter:
     def is_admin(self, user_id: str) -> bool:
         return str(user_id) in set(self.settings.admin_user_ids)
 
+    def _language(self, user_id: str) -> str:
+        profile = self.profile_service.get(str(user_id))
+        return str((profile or {}).get("language") or "ru")
+
     @staticmethod
     def _is_command(text: str, command: str) -> bool:
         return text == command or text.startswith(command + " ")
@@ -100,12 +107,12 @@ class BotRouter:
         profile = self.profile_service.get(uid)
         if profile and profile.get("onboarding_state") == "complete":
             name = html.escape(profile.get("name") or "")
-            greeting = "Доброго времени суток! Я помогу вам с выбором досуга на основе ваших интересов, расписания и компании."
+            greeting = t(profile.get("language"), "greeting")
             if name:
                 greeting = f"{greeting}\n\nРада вас видеть, <b>{name}</b>!"
             if prefix_notice:
                 greeting = f"{prefix_notice}\n\n{greeting}"
-            return BotResponse(text=greeting, reply_markup=home_keyboard())
+            return BotResponse(text=greeting, reply_markup=home_keyboard(profile.get("language", "ru")))
         if not profile:
             return BotResponse(text="<b>Выберите язык / Телде һайлағыҙ / Choose language</b>", reply_markup=language_keyboard())
         return BotResponse(text="Продолжите регистрацию через /start.")
@@ -114,6 +121,7 @@ class BotRouter:
         uid = str(user_id)
         filters = self.get_user_filters(uid)
         profile = self.profile_service.get(uid)
+        language = self._language(uid)
         if profile and profile.get("onboarding_state") == "complete":
             events, total, explanation = self.search_service.search_for_profile(
                 filters, profile.get("latitude"), profile.get("longitude"), profile.get("favorite_categories"),
@@ -126,26 +134,40 @@ class BotRouter:
                 filters, self.settings.get_reference_date()
             )
             if alternatives:
-                if recommendation_kind == "same_city":
-                    intro = (f"К сожалению, по выбранным фильтрам в городе <b>{html.escape(filters.city or '')}</b> "
-                             "ничего не удалось найти. Могу предложить ближайшие мероприятия в этом же городе:")
-                elif recommendation_kind == "nearby_city":
-                    intro = ("К сожалению, в выбранном городе подходящих будущих мероприятий нет. "
-                             "Могу предложить варианты в ближайшем городе:")
-                else:
-                    intro = "К сожалению, подходящих мероприятий не найдено. Могу предложить ближайшие варианты:"
+                intros = {
+                    "ru": {
+                        "same_city": f"К сожалению, по выбранным фильтрам в городе <b>{html.escape(filters.city or '')}</b> ничего не найдено. Могу предложить ближайшие мероприятия в этом же городе:",
+                        "nearby_city": "К сожалению, в выбранном городе подходящих мероприятий нет. Могу предложить варианты в ближайшем городе:",
+                        "other_city": "К сожалению, подходящих мероприятий не найдено. Могу предложить ближайшие варианты:",
+                    },
+                    "en": {
+                        "same_city": f"Unfortunately, nothing matches your filters in <b>{html.escape(filters.city or '')}</b>. Here are the nearest dates in the same city:",
+                        "nearby_city": "Unfortunately, there are no matching events in that city. Here are options in the nearest city:",
+                        "other_city": "Unfortunately, no exact matches were found. Here are the nearest alternatives:",
+                    },
+                    "ba": {
+                        "same_city": f"Ҡыҙғанысҡа ҡаршы, <b>{html.escape(filters.city or '')}</b> ҡалаһында һайланған шарттар буйынса саралар табылманы. Ошо ҡалалағы яҡындағы саралар:",
+                        "nearby_city": "Ҡыҙғанысҡа ҡаршы, һайланған ҡалала ярашлы саралар юҡ. Яҡындағы ҡалалағы варианттар:",
+                        "other_city": "Ҡыҙғанысҡа ҡаршы, теүәл ярашлы саралар табылманы. Яҡындағы варианттар:",
+                    },
+                }
+                intro = intros[language].get(recommendation_kind, intros[language]["other_city"])
                 lines = [intro]
                 for index, event in enumerate(alternatives, start=1):
-                    distance = f", {event.distance_km:.1f} км от выбранного города" if event.distance_km is not None else ""
-                    lines.append(f"\n<b>{chr(96 + index)}) {html.escape(event.title)}</b>\n"
-                                 f"📅 {format_datetime_ru(event.date_start)}\n📍 {html.escape(event.city)}{distance}")
+                    distance = (f", {event.distance_km:.1f} km away" if language == "en" else f", {event.distance_km:.1f} км") if event.distance_km is not None else ""
+                    lines.append(f"\n<b>{index}. {html.escape(event.title)}</b>\n"
+                                 f"📅 {format_datetime(event.date_start, language)}\n📍 {html.escape(event.city)}{distance}")
                 keyboard = {"inline_keyboard": [
                     [{"text": f"📌 {event.title[:34]}", "callback_data": f"card:{event.id}"}]
                     for event in alternatives
-                ] + [[{"text": "✨ Новый поиск", "callback_data": "leisure:start"}]]}
+                ] + [[{"text": t(language, "new_search"), "callback_data": "leisure:start"}]]}
                 return BotResponse(text="\n".join(lines), reply_markup=keyboard)
-        text = format_search_results(events, total, filters, empty_explanation=explanation)
-        kb = search_results_keyboard(events, total, filters, is_subscribed=is_sub)
+        text = format_search_results(
+            events, total, filters,
+            empty_explanation=explanation if language == "ru" else None,
+            language=language,
+        )
+        kb = search_results_keyboard(events, total, filters, is_subscribed=is_sub, language=language)
         return BotResponse(text=text, reply_markup=kb)
 
     def _handle_agent_query(self, uid: str, text: str) -> BotResponse:
@@ -216,60 +238,19 @@ class BotRouter:
                         reply_markup=language_keyboard(),
                     )
                 if profile.get("onboarding_state") != "complete":
-                    prompts = {
-                        "name": "👋 <b>Как к вам обращаться?</b> Введите ваше имя.",
-                        "phone": "📱 <b>Укажите номер телефона.</b> Он нужен только для уведомлений о новых мероприятиях; мы не передаём его организаторам.",
-                        "city": "🏙 <b>В каком городе вы живёте?</b> Это необязательное поле для местных уведомлений. Напишите город или пропустите шаг.",
-                    }
+                    prompts = {key: t(profile.get("language"), key) for key in ("name", "phone", "city")}
                     state = profile.get("onboarding_state", "name")
-                    markup = contact_keyboard() if state == "phone" else (
-                        {"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]}
+                    markup = contact_keyboard(profile.get("language", "ru")) if state == "phone" else (
+                        {"inline_keyboard": [[{"text": t(profile.get("language"), "skip"), "callback_data": "onboarding:skip_city"}]]}
                         if state == "city" else None
                     )
                     return BotResponse(text=prompts.get(state, prompts["name"]), reply_markup=markup)
                 return self._build_main_menu_response(uid)
 
-            if self._is_command(clean_text, "/search"):
-                return self._execute_search_response(uid)
-
-            if self._is_command(clean_text, "/help"):
-                filters = self.get_user_filters(uid)
-                cnt = self.search_service.count_matching(filters)
-                subs_cnt = len(self.sub_service.list_subscriptions(uid))
-                return BotResponse(
-                    text=format_help_message(),
-                    reply_markup=main_menu_keyboard(filters, matching_count=cnt, subs_count=subs_cnt),
-                )
-
-            if self._is_command(clean_text, "/cancel"):
-                self.reset_user_filters(uid)
+            if clean_text.startswith("/"):
                 return self._build_main_menu_response(
-                    uid,
-                    prefix_notice="🔄 <b>Фильтры поиска сброшены.</b> Вы можете ввести новый запрос или выбрать параметры ниже:",
+                    uid, prefix_notice="Доступна только команда /start. Остальные действия выполняются кнопками."
                 )
-
-            if self._is_command(clean_text, "/unsubscribe"):
-                removed = self.sub_service.unsubscribe_all(uid)
-                if removed > 0:
-                    return self._build_main_menu_response(
-                        uid,
-                        prefix_notice=f"✅ <b>Вы отписаны от всех уведомлений</b> (удалено подписок: {removed}).",
-                    )
-                return self._build_main_menu_response(
-                    uid,
-                    prefix_notice="ℹ️ У вас не было активных подписок.",
-                )
-
-            if self._is_command(clean_text, "/subscriptions"):
-                subs = self.sub_service.list_subscriptions(uid)
-                return BotResponse(
-                    text=format_subscriptions_list(subs),
-                    reply_markup=subscriptions_keyboard(subs),
-                )
-
-            if clean_text.startswith("/event_"):
-                ev_id = clean_text[len("/event_"):].split()[0]
-                return self._open_card(uid, ev_id)
 
             profile = self.profile_service.get(uid)
             if profile and profile.get("onboarding_state") != "complete":
@@ -318,9 +299,6 @@ class BotRouter:
                 self._leisure_wizard[uid] = "form"
                 return self._leisure_form_response(uid)
 
-            if self._is_command(clean_text, "/admin") or clean_text.startswith("/admin_"):
-                return self._handle_admin_command(uid, clean_text)
-
             # 2. Если пользователь вводит выбранную дату после нажатия кнопки «Указать дату»
             if self._awaiting_custom_date.get(uid):
                 self._awaiting_custom_date.pop(uid, None)
@@ -364,38 +342,36 @@ class BotRouter:
             )
 
     def _leisure_form_response(self, uid: str, notice: str = "") -> BotResponse:
-        text = "<b>Настройте поиск досуга</b>\nВыберите город, дату и интересующие виды досуга."
+        language = self._language(uid)
+        text = t(language, "form_title")
         if notice:
             text = f"{notice}\n\n{text}"
-        return BotResponse(text=text, reply_markup=leisure_search_keyboard(self.get_user_filters(uid)))
+        return BotResponse(text=text, reply_markup=leisure_search_keyboard(self.get_user_filters(uid), language))
 
     def _handle_profile_text(self, uid: str, text: str, profile: Dict[str, Any]) -> BotResponse:
         state = profile.get("onboarding_state")
+        language = profile.get("language", "ru")
         if state == "name":
             if len(text) < 2 or len(text) > 80:
                 return BotResponse(text="Введите имя от 2 до 80 символов.")
             self.profile_service.update(uid, name=text, onboarding_state="phone")
-            return BotResponse(
-                text=("📱 <b>Укажите номер телефона.</b> Он нужен только для уведомлений о новых мероприятиях "
-                      "в вашем городе и не передаётся организаторам.\n\n"
-                      "Отправьте контакт кнопкой ниже или введите номер в международном формате."),
-                reply_markup=contact_keyboard(),
-            )
+            return BotResponse(text=t(language, "phone"), reply_markup=contact_keyboard(language))
         if state == "phone":
             digits = "".join(char for char in text if char.isdigit())
             if len(digits) < 10 or len(digits) > 15:
                 return BotResponse(text="Пожалуйста, отправьте номер кнопкой или введите корректный номер.", reply_markup=contact_keyboard())
             self.profile_service.update(uid, phone=text, onboarding_state="city")
-            return BotResponse(text="🏙 <b>В каком городе вы живёте?</b> Это необязательно: город нужен только для местных уведомлений. Напишите город или нажмите «Пропустить».", reply_markup={"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]})
+            return BotResponse(text=t(language, "city"), reply_markup={"inline_keyboard": [[{"text": t(language, "skip"), "callback_data": "onboarding:skip_city"}]]})
         if state == "city":
             city = resolve_city(text, db=self.db)
             if not city:
                 return BotResponse(text="Не нашла такой город в каталоге. Проверьте написание или нажмите «Пропустить».", reply_markup={"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]})
             self.profile_service.update(uid, city=city, onboarding_state="complete")
-            return self._build_main_menu_response(uid, "✅ Регистрация завершена.")
+            return self._build_main_menu_response(uid, t(language, "registered"))
         return self._build_main_menu_response(uid)
 
     def _save_profile_field(self, uid: str, field: str, text: str) -> BotResponse:
+        language = self._language(uid)
         if field == "phone":
             digits = "".join(char for char in text if char.isdigit())
             if len(digits) < 10 or len(digits) > 15:
@@ -408,17 +384,22 @@ class BotRouter:
                 return BotResponse(text="Не нашла такой город в каталоге. Проверьте написание и попробуйте ещё раз.")
             text = city
         self.profile_service.update(uid, **{field: text})
-        return self._profile_response(uid, "✅ Данные сохранены.")
+        saved = {"ru": "✅ Данные сохранены.", "en": "✅ Changes saved.", "ba": "✅ Мәғлүмәттәр һаҡланды."}[language]
+        return self._profile_response(uid, saved)
 
     def _profile_response(self, uid: str, notice: str = "") -> BotResponse:
         profile = self.profile_service.get(uid) or {}
         cats = ", ".join(profile.get("favorite_categories") or []) or "не выбраны"
         location = "передана" if profile.get("latitude") is not None else "не передана"
-        text = (f"👤 <b>Профиль</b>\n\nИмя: <b>{html.escape(profile.get('name') or '—')}</b>\n"
-                f"Телефон: <b>{html.escape(profile.get('phone') or '—')}</b>\n"
-                f"Город: <b>{html.escape(profile.get('city') or '—')}</b>\n"
-                f"Любимые категории: <b>{html.escape(cats)}</b>\n"
-                f"Геолокация: <b>{location}</b>")
+        language = profile.get("language", "ru")
+        cats = ", ".join(profile.get("favorite_categories") or []) or t(language, "not_selected")
+        location = t(language, "shared") if profile.get("latitude") is not None else t(language, "not_shared")
+        text = (f"{t(language, 'profile_title')}\n\n{t(language, 'field_name')}: <b>{html.escape(profile.get('name') or '—')}</b>\n"
+                f"{t(language, 'field_phone')}: <b>{html.escape(profile.get('phone') or '—')}</b>\n"
+                f"{t(language, 'field_city')}: <b>{html.escape(profile.get('city') or '—')}</b>\n"
+                f"{t(language, 'field_favorites')}: <b>{html.escape(cats)}</b>\n"
+                f"{t(language, 'field_location')}: <b>{location}</b>\n"
+                f"{t(language, 'language_label')}: <b>{html.escape(language)}</b>")
         return BotResponse(text=(notice + "\n\n" if notice else "") + text, reply_markup=profile_keyboard(profile))
 
     def handle_contact(self, user_id: str, phone: str) -> BotResponse:
@@ -428,14 +409,22 @@ class BotRouter:
         state = profile.get("onboarding_state")
         if state == "phone":
             self.profile_service.update(str(user_id), phone=phone, onboarding_state="city")
-            return BotResponse(text="🏙 <b>В каком городе вы живёте?</b> Это необязательное поле для местных уведомлений. Напишите город или пропустите этот шаг.", reply_markup={"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]})
+            return BotResponse(text=t(profile.get("language"), "city"), reply_markup={"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]})
         self.profile_service.update(str(user_id), phone=phone)
-        return self._profile_response(str(user_id), "✅ Телефон обновлён.")
+        language = self._language(str(user_id))
+        notice = {"ru": "✅ Телефон обновлён.", "en": "✅ Phone number updated.", "ba": "✅ Телефон яңыртылды."}[language]
+        return self._profile_response(str(user_id), notice)
 
     def handle_location(self, user_id: str, latitude: float, longitude: float) -> BotResponse:
         self.profile_service.ensure(str(user_id))
         self.profile_service.update(str(user_id), latitude=latitude, longitude=longitude)
-        return self._profile_response(str(user_id), "✅ Геолокация сохранена. Она используется только для сортировки мероприятий по близости и никуда не передаётся.")
+        language = self._language(str(user_id))
+        notice = {
+            "ru": "✅ Геолокация сохранена. Она используется только для сортировки мероприятий по близости.",
+            "en": "✅ Location saved. It is used only to sort events by distance.",
+            "ba": "✅ Геолокация һаҡланды. Ул сараларҙы алыҫлыҡ буйынса теҙеү өсөн генә ҡулланыла.",
+        }[language]
+        return self._profile_response(str(user_id), notice)
 
     def _open_card(self, uid: str, event_id_or_prefix: str) -> BotResponse:
         ev = self.search_service.get_event_by_id(event_id_or_prefix, include_drafts=self.is_admin(uid))
@@ -449,8 +438,8 @@ class BotRouter:
             ev.distance_km = self.search_service.distance_km(profile["latitude"], profile["longitude"], ev)
         is_sub = self.sub_service.is_subscribed(uid, ev.city, ev.category)
         return BotResponse(
-            text=format_event_card(ev),
-            reply_markup=event_card_keyboard(ev, is_subscribed=is_sub),
+            text=format_event_card(ev, language=self._language(uid)),
+            reply_markup=event_card_keyboard(ev, is_subscribed=is_sub, language=self._language(uid)),
         )
 
     def handle_callback(self, user_id: str, callback_data: str) -> BotResponse:
@@ -472,26 +461,79 @@ class BotRouter:
                 if language not in {"ru", "ba", "en"}:
                     return BotResponse(text="Выберите язык кнопкой ниже.", reply_markup=language_keyboard())
                 self.profile_service.ensure(uid, language)
-                return BotResponse(text="👋 <b>Как к вам обращаться?</b> Введите ваше имя.")
+                return BotResponse(text=t(language, "name"))
 
             if callback_data == "onboarding:skip_city":
                 self.profile_service.update(uid, city=None, onboarding_state="complete")
-                return self._build_main_menu_response(uid, "✅ Регистрация завершена.")
+                profile = self.profile_service.get(uid) or {}
+                return self._build_main_menu_response(uid, t(profile.get("language"), "registered"))
 
             if callback_data == "profile:open":
                 return self._profile_response(uid)
+
+            if callback_data == "profile:language":
+                return BotResponse(
+                    text="<b>Выберите язык / Телде һайлағыҙ / Choose language</b>",
+                    reply_markup={"inline_keyboard": [
+                        [{"text": "Русский", "callback_data": "profile_lang:ru"}],
+                        [{"text": "Башҡортса", "callback_data": "profile_lang:ba"}],
+                        [{"text": "English", "callback_data": "profile_lang:en"}],
+                    ]},
+                )
+
+            if callback_data.startswith("profile_lang:"):
+                language = callback_data.split(":", 1)[1]
+                if language not in {"ru", "ba", "en"}:
+                    return self._profile_response(uid)
+                self.profile_service.update(uid, language=language)
+                return self._profile_response(uid, t(language, "lang_saved"))
+
+            if callback_data == "profile:delete_confirm":
+                language = self._language(uid)
+                delete_text = {
+                    "ru": "⚠️ <b>Удалить аккаунт?</b>\n\nБудут безвозвратно удалены имя, телефон, город, геолокация, любимые категории и уведомления.",
+                    "en": "⚠️ <b>Delete your account?</b>\n\nYour name, phone, city, location, favourites and notifications will be permanently deleted.",
+                    "ba": "⚠️ <b>Аккаунтты юйырғамы?</b>\n\nИсем, телефон, ҡала, геолокация, яратҡан категориялар һәм хәбәрнамәләр бөтөнләй юйыласаҡ.",
+                }[language]
+                return BotResponse(
+                    text=delete_text,
+                    reply_markup=delete_account_keyboard(language),
+                )
+
+            if callback_data == "profile:delete":
+                language = self._language(uid)
+                self.sub_service.unsubscribe_all(uid)
+                self.profile_service.delete(uid)
+                self.reset_user_filters(uid)
+                self._awaiting_profile_field.pop(uid, None)
+                self._leisure_wizard.pop(uid, None)
+                deleted_text = {
+                    "ru": "✅ Аккаунт и связанные данные удалены. Если захотите вернуться, начните заново.",
+                    "en": "✅ Your account and associated data have been deleted. You can start again at any time.",
+                    "ba": "✅ Аккаунт һәм уға бәйле мәғлүмәттәр юйылды. Теләһәгеҙ, яңынан башлай алаһығыҙ.",
+                }[language]
+                return BotResponse(
+                    text=deleted_text,
+                    reply_markup=language_keyboard(),
+                )
 
             if callback_data.startswith("profile:edit:"):
                 field = callback_data.rsplit(":", 1)[1]
                 if field not in {"name", "phone", "city"}:
                     return self._profile_response(uid)
                 self._awaiting_profile_field[uid] = field
-                prompt = {"name": "Введите новое имя.", "phone": "Отправьте новый номер кнопкой или введите его текстом.", "city": "Введите город проживания."}[field]
-                return BotResponse(text=prompt, reply_markup=contact_keyboard() if field == "phone" else None)
+                language = self._language(uid)
+                prompts = {
+                    "ru": {"name": "Введите новое имя.", "phone": "Отправьте новый номер кнопкой или введите его текстом.", "city": "Введите город проживания."},
+                    "en": {"name": "Enter your new name.", "phone": "Share your new number or enter it as text.", "city": "Enter your home city."},
+                    "ba": {"name": "Яңы исемегеҙҙе яҙығыҙ.", "phone": "Яңы номерҙы ебәрегеҙ йәки ҡулдан индерегеҙ.", "city": "Йәшәгән ҡалағыҙҙы яҙығыҙ."},
+                }
+                return BotResponse(text=prompts[language][field], reply_markup=contact_keyboard(language) if field == "phone" else None)
 
             if callback_data == "profile:categories":
                 profile = self.profile_service.get(uid) or {}
-                return BotResponse(text="🎭 <b>Выберите любимые категории</b> — можно несколько.", reply_markup=profile_categories_keyboard(profile.get("favorite_categories") or []))
+                language = self._language(uid)
+                return BotResponse(text=t(language, "choose_types"), reply_markup=profile_categories_keyboard(profile.get("favorite_categories") or [], language))
 
             if callback_data.startswith("profile:cat:"):
                 category = callback_data.rsplit(":", 1)[1]
@@ -502,13 +544,22 @@ class BotRouter:
                 else:
                     selected.append(category)
                 self.profile_service.update(uid, favorite_categories=selected)
-                return BotResponse(text="🎭 <b>Выберите любимые категории</b> — можно несколько.", reply_markup=profile_categories_keyboard(selected))
+                language = self._language(uid)
+                return BotResponse(text=t(language, "choose_types"), reply_markup=profile_categories_keyboard(selected, language))
 
             if callback_data == "profile:done":
-                return self._profile_response(uid, "✅ Любимые категории сохранены.")
+                language = self._language(uid)
+                notice = {"ru": "✅ Любимые категории сохранены.", "en": "✅ Favourite categories saved.", "ba": "✅ Яратҡан категориялар һаҡланды."}[language]
+                return self._profile_response(uid, notice)
 
             if callback_data == "profile:location":
-                return BotResponse(text="📍 Передайте геолокацию кнопкой ниже. Она нужна только для сортировки найденных мероприятий по близости и не передаётся организаторам.", reply_markup=location_keyboard())
+                language = self._language(uid)
+                messages = {
+                    "ru": "📍 Передайте геолокацию кнопкой ниже. Она нужна только для сортировки мероприятий по близости и не передаётся организаторам.",
+                    "en": "📍 Share your location below. It is used only to sort events by distance and is never shared with organisers.",
+                    "ba": "📍 Геолокацияғыҙҙы ебәрегеҙ. Ул сараларҙы алыҫлыҡ буйынса теҙеү өсөн генә ҡулланыла һәм ойоштороусыларға тапшырылмай.",
+                }
+                return BotResponse(text=messages[language], reply_markup=location_keyboard(language))
 
             if callback_data == "leisure:start":
                 self.reset_user_filters(uid)
@@ -520,11 +571,12 @@ class BotRouter:
                 return self._leisure_form_response(uid)
 
             if callback_data == "leisure:city_menu":
-                return BotResponse(text="🏙 <b>Выберите город</b> или введите свой вручную.", reply_markup=leisure_cities_keyboard())
+                language = self._language(uid)
+                return BotResponse(text=t(language, "choose_city"), reply_markup=leisure_cities_keyboard(language))
 
             if callback_data == "leisure:city_manual":
                 self._leisure_wizard[uid] = "city_manual"
-                return BotResponse(text="🏙 Введите название города.")
+                return BotResponse(text=t(self._language(uid), "enter_city"))
 
             if callback_data.startswith("leisure:city:"):
                 self.get_user_filters(uid).city = callback_data.rsplit(":", 1)[1]
@@ -532,11 +584,12 @@ class BotRouter:
                 return self._leisure_form_response(uid)
 
             if callback_data == "leisure:date_menu":
-                return BotResponse(text="📅 <b>Выберите дату</b> или введите свою вручную.", reply_markup=leisure_dates_keyboard())
+                language = self._language(uid)
+                return BotResponse(text=t(language, "choose_date"), reply_markup=leisure_dates_keyboard(language))
 
             if callback_data == "leisure:date_manual":
                 self._leisure_wizard[uid] = "date_manual"
-                return BotResponse(text="📅 Введите дату в формате ДД.ММ.ГГГГ, например 15.11.2026.")
+                return BotResponse(text=t(self._language(uid), "enter_date"))
 
             if callback_data.startswith("leisure:date:"):
                 preset = callback_data.rsplit(":", 1)[1]
@@ -547,7 +600,8 @@ class BotRouter:
                 return self._leisure_form_response(uid)
 
             if callback_data == "leisure:category_menu":
-                return BotResponse(text="🎭 <b>Выберите один или несколько видов досуга.</b>", reply_markup=leisure_categories_keyboard(self.get_user_filters(uid).categories))
+                language = self._language(uid)
+                return BotResponse(text=t(language, "choose_types"), reply_markup=leisure_categories_keyboard(self.get_user_filters(uid).categories, language))
 
             if callback_data == "leisure:category_manual":
                 self._leisure_wizard[uid] = "category_manual"
@@ -560,7 +614,8 @@ class BotRouter:
                     filters.categories.remove(category)
                 else:
                     filters.categories.append(category)
-                return BotResponse(text="🎭 <b>Выберите один или несколько видов досуга.</b>", reply_markup=leisure_categories_keyboard(filters.categories))
+                language = self._language(uid)
+                return BotResponse(text=t(language, "choose_types"), reply_markup=leisure_categories_keyboard(filters.categories, language))
 
             if callback_data == "leisure:categories_done":
                 self._leisure_wizard[uid] = "form"
@@ -569,7 +624,7 @@ class BotRouter:
             if callback_data == "leisure:run":
                 filters = self.get_user_filters(uid)
                 if not filters.city or not filters.date_from or not filters.categories:
-                    return self._leisure_form_response(uid, "Заполните город, дату и хотя бы один вид досуга.")
+                    return self._leisure_form_response(uid, t(self._language(uid), "fill_all"))
                 self._leisure_wizard.pop(uid, None)
                 return self._execute_search_response(uid)
 

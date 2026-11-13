@@ -4,6 +4,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urlsplit
@@ -130,7 +131,9 @@ class Settings:
                 return datetime.strptime(self.reference_date_str, "%Y-%m-%d").date()
             except ValueError:
                 pass
-        return date.today()
+        # Telegram users of this bot are served in Bashkortostan/Moscow time,
+        # not the UTC date of a Docker host around midnight.
+        return datetime.now(ZoneInfo("Europe/Moscow")).date()
 
     def model_cost(self, usage: list[dict]) -> Decimal | None:
         """Return model cost in USD; unknown or invalid prices remain unknown."""

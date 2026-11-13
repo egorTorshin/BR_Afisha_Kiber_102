@@ -26,7 +26,7 @@ ROLE_TABLES = {
         "INSERT": ("events", "event_sources", "raw_events", "import_reports", "subscriptions",
                    "audit_log", "bot_profiles"),
         "UPDATE": ("events", "event_sources", "raw_events", "subscriptions", "feedback", "bot_profiles"),
-        "DELETE": ("event_sources", "subscriptions"),
+        "DELETE": ("event_sources", "subscriptions", "bot_profiles"),
     },
     "afisha_maintenance": {
         "SELECT": ("events", "raw_events", "subscriptions", "feedback", "audit_log",
