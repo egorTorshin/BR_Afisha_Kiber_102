@@ -1,15 +1,12 @@
 /** Wire contracts: src/api.py and src/models/schemas.py. */
 export interface EventSource {
-  event_id: string;
   source_url: string;
   source_type: string;
-  source_hash: string;
   verified_at: string;
 }
 export interface CultureEvent {
   id: string;
   title: string;
-  normalized_title: string;
   category: string;
   tags: string[];
   date_start: string;
@@ -29,16 +26,11 @@ export interface CultureEvent {
   org_link: string | null;
   source_url: string;
   source_type: string;
-  source_hash: string;
   verified_at: string;
   confidence: number;
   status: string;
-  dedup_key: string;
   is_disputed: boolean;
   dispute_reason: string | null;
-  created_at: string;
-  updated_at: string;
-  raw_event_id?: string | null;
   sources: EventSource[];
 }
 export interface EventPage {

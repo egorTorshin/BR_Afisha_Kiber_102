@@ -1,3 +1,4 @@
+import html
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -47,7 +48,8 @@ class BotRouter:
         self.db = db
         self.settings = settings
         self.search_service = SearchService(db)
-        self.import_service = ImportService(db)
+        self.import_service = ImportService(db, max_import_bytes=settings.max_import_bytes,
+                                            max_import_rows=settings.max_import_rows)
         self.sub_service = SubscriptionService(db, retention_days=settings.subscription_retention_days)
         self.rate_limiter = RateLimiter(max_requests_per_minute=settings.rate_limit_per_minute)
         self.logger = get_logger("afisha_rb.bot", settings.log_level)
@@ -187,7 +189,7 @@ class BotRouter:
             return self._execute_search_response(uid)
 
         except Exception as exc:
-            log_event(self.logger, logging.ERROR, "Error handling message", user_id=uid, error=repr(exc))
+            log_event(self.logger, logging.ERROR, "Error handling message", user_id=uid, error_type=type(exc).__name__)
             return self._build_main_menu_response(
                 uid,
                 prefix_notice="⚠️ Не удалось разобрать запрос. Пожалуйста, уточните формулировку или выберите фильтр кнопками:",
@@ -272,7 +274,7 @@ class BotRouter:
             if callback_data == "menu:categories":
                 cat_rows = self.search_service.list_categories_with_counts(city=filters.city)
                 cat_counts = {r["category"]: r["cnt"] for r in cat_rows}
-                city_note = f" (г. {filters.city})" if filters.city else " (вся республика)"
+                city_note = f" (г. {html.escape(filters.city)})" if filters.city else " (вся республика)"
                 return BotResponse(
                     text=f"🎭 <b>Выберите категорию культурного мероприятия{city_note}:</b>",
                     reply_markup=categories_keyboard(cat_counts=cat_counts, selected_category=filters.category),
@@ -388,7 +390,7 @@ class BotRouter:
                 return BotResponse(
                     text=(
                         f"✅ <b>Подписка {status_word}!</b>\n"
-                        f"Город: <b>{sub['city']}</b> | Категория: <b>{sub['category']}</b>\n"
+                        f"Город: <b>{html.escape(sub['city'])}</b> | Категория: <b>{html.escape(sub['category'])}</b>\n"
                         f"Отписаться в любой момент можно одной командой: /unsubscribe\n\n"
                         + format_subscriptions_list(subs)
                     ),
@@ -402,9 +404,9 @@ class BotRouter:
                 res = self.sub_service.toggle_subscription(uid, city_val, cat_val)
                 subs = self.sub_service.list_subscriptions(uid)
                 if res["subscribed"]:
-                    msg = f"✅ <b>Подписка оформлена:</b> {res['city']} • {res['category']}"
+                    msg = f"✅ <b>Подписка оформлена:</b> {html.escape(res['city'])} • {html.escape(res['category'])}"
                 else:
-                    msg = f"🔕 <b>Подписка удалена:</b> {res['city']} • {res['category']}"
+                    msg = f"🔕 <b>Подписка удалена:</b> {html.escape(res['city'])} • {html.escape(res['category'])}"
                 return BotResponse(
                     text=f"{msg}\n\n{format_subscriptions_list(subs)}",
                     reply_markup=subscriptions_keyboard(subs),
@@ -437,7 +439,7 @@ class BotRouter:
 
             return self._build_main_menu_response(uid)
         except Exception as exc:
-            log_event(self.logger, logging.ERROR, "Callback error", user_id=uid, error=repr(exc))
+            log_event(self.logger, logging.ERROR, "Callback error", user_id=uid, error_type=type(exc).__name__)
             return self._build_main_menu_response(
                 uid,
                 prefix_notice="⚠️ Произошла ошибка при обработке кнопки. Попробуйте ещё раз.",
@@ -451,6 +453,10 @@ class BotRouter:
             return BotResponse(
                 text="🔒 Загрузка файлов расписания доступна только модераторам сервиса."
             )
+        if not self.rate_limiter.allow(uid):
+            return BotResponse(text="⏳ Слишком много запросов. Повторите попытку позже.")
+        if len(content.encode("utf-8")) > self.import_service.max_import_bytes:
+            return BotResponse(text="❌ Файл импорта слишком большой.")
         suffix = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         try:
             report = self.import_service.import_from_content(
@@ -462,7 +468,7 @@ class BotRouter:
             return BotResponse(text=format_import_report(report))
         except Exception as exc:
             return BotResponse(
-                text=f"❌ Ошибка при импорте файла «{filename}»: {exc}"
+                text=f"❌ Ошибка при импорте файла «{html.escape(filename)}»: {html.escape(str(exc))}"
             )
 
     def _handle_admin_command(self, uid: str, text: str) -> BotResponse:
@@ -481,30 +487,27 @@ class BotRouter:
             lines = ["🔎 <b>Очередь спорных карточек:</b>\n"]
             for r in rows:
                 lines.append(
-                    f"• <code>{r['id']}</code> — <b>{r['title']}</b> ({r['city']}, статус: {r['status']})\n"
-                    f"  Причина: {r['dispute_reason']}\n"
-                    f"  Команды: <code>/admin_publish {r['id']}</code> | <code>/admin_cancel {r['id']}</code>"
+                    f"• <code>{html.escape(r['id'])}</code> — <b>{html.escape(r['title'])}</b> ({html.escape(r['city'])}, статус: {html.escape(r['status'])})\n"
+                    f"  Причина: {html.escape(r['dispute_reason'] or '')}\n"
+                    f"  Команды: <code>/admin_publish {html.escape(r['id'])}</code> | <code>/admin_cancel {html.escape(r['id'])}</code>"
                 )
             return BotResponse(text="\n".join(lines))
 
         if cmd in ("/admin_cancel", "/admin_publish", "/admin_draft") and len(parts) >= 2:
             target_id = parts[1].strip()
-            row = self.db.fetchone(
-                "SELECT id FROM events WHERE id = ? OR id LIKE ?",
-                (target_id, f"{target_id}%"),
-            )
-            if not row:
-                return BotResponse(text=f"⚠️ Событие '{target_id}' не найдено.")
+            target = self.search_service.get_event_by_id(target_id, include_drafts=True)
+            if target is None:
+                return BotResponse(text=f"⚠️ Событие '{html.escape(target_id)}' не найдено.")
             status_map = {
                 "/admin_cancel": "отменено",
                 "/admin_publish": "опубликовано",
                 "/admin_draft": "черновик",
             }
             ev = self.import_service.update_event_status(
-                str(row["id"]), status_map[cmd], actor=f"tg_moderator_{uid}"
+                target.id, status_map[cmd], actor=f"tg_moderator_{uid}"
             )
             return BotResponse(
-                text=f"✅ Статус события «{ev.title}» изменён на <b>{ev.status}</b> (записано в журнал изменений)."
+                text=f"✅ Статус события «{html.escape(ev.title)}» изменён на <b>{html.escape(ev.status)}</b> (записано в журнал изменений)."
             )
 
         if cmd == "/admin_audit":
@@ -514,7 +517,7 @@ class BotRouter:
             lines = ["📋 <b>Последние записи журнала изменений (audit_log):</b>\n"]
             for r in rows:
                 lines.append(
-                    f"• [{r['created_at'][:19]}] <b>{r['actor']}</b> → {r['action']} ({r['entity_type']} {r['entity_id'][:8]})"
+                    f"• [{html.escape(r['created_at'][:19])}] <b>{html.escape(r['actor'])}</b> → {html.escape(r['action'])} ({html.escape(r['entity_type'])} {html.escape(r['entity_id'][:8])})"
                 )
             return BotResponse(text="\n".join(lines))
 

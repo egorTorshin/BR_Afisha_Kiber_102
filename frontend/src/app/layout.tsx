@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { SiteChrome } from "@/components/site-chrome";
 import "./globals.css";
 export const metadata: Metadata = {
@@ -9,9 +10,10 @@ export const metadata: Metadata = {
   description:
     "Афиша культурных событий Башкортостана: спектакли, концерты, выставки и новые впечатления рядом с вами.",
 };
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  await headers();
   return (
     <html lang="ru">
       <body>

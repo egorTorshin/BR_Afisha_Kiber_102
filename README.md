@@ -27,18 +27,22 @@
 ```text
 afisha-bashkortostan-lvl1/
 ├── Dockerfile                  # Сборка контейнера сервиса
-├── docker-compose.yml          # Запуск PostgreSQL 16 + Telegram-бота одной командой
+├── docker-compose.yml          # PostgreSQL, подготовка БД, API, сайт, бот и очистка
 ├── .env.example                # Шаблон переменных окружения (без секретов)
 ├── requirements.txt            # Зависимости Python
 ├── migrations/
-│   └── 001_initial_schema.sql  # Реляционная схема БД и индексы
+│   ├── 001_initial_schema.sql  # Реляционная схема БД и индексы
+│   ├── 002_admin_backend.sql   # Источники, заявки и модерация
+│   └── 003_security_search.sql # Сессии, лимиты и индексы поиска
 ├── data/
 │   ├── dictionaries.json       # Справочники городов (с алиасами), категорий и площадок РБ
 │   ├── seed_events.json        # Подготовленный набор из 20 событий для демонстрации
 │   └── import_100_events.csv   # Набор из 100 событий для проверки метрики импорта
 ├── src/
 │   ├── config.py               # Конфигурация приложения через переменные окружения
-│   ├── main.py                 # Точка входа: миграции, загрузка данных и запуск бота
+│   ├── bootstrap.py            # Отдельная подготовка БД и очистка по срокам хранения
+│   ├── main.py                 # Точка входа Telegram-бота
+│   ├── http/                   # Публичные и административные маршруты, схемы, защита и ошибки
 │   ├── cli.py                  # Командный скрипт импорта, ручного ввода, модерации и метрик
 │   ├── db/
 │   │   ├── connection.py       # Адаптер БД (PostgreSQL + SQLite для локальных тестов)
@@ -70,19 +74,28 @@ afisha-bashkortostan-lvl1/
 Требуются Docker Engine с Compose и свободные порты 3000, 8000 и 5433. PostgreSQL доступен с хоста на порту 5433; внутри Compose сервисы подключаются к `db:5432`.
 
 ```bash
-cp .env.example .env   # необязательно; задайте токен для включения бота
+cp .env.example .env
+# Задайте POSTGRES_PASSWORD, API_DB_PASSWORD, BOT_DB_PASSWORD,
+# MAINTENANCE_DB_PASSWORD и RATE_LIMIT_SECRET в .env перед запуском.
 docker compose up --build
 ```
 
 Откройте сайт на http://localhost:3000, API на http://localhost:8000, документацию API на http://localhost:8000/docs и проверку состояния на http://localhost:8000/health. API и Next.js ждут готовности зависимостей. Браузер запрашивает API через same-origin путь `/backend`; только сервер Next.js использует `http://api:8000` внутри Compose. В клиентский JavaScript Docker hostname не попадает.
 
-При первом старте API применяет `001_initial_schema.sql` и `002_admin_backend.sql`, загружает справочники и `data/seed_events.json`. Повторные старты мигрируют только новые версии; сиды импортируются идемпотентно. PostgreSQL хранит данные в volume `pgdata`. Для полной очистки демо-БД выполните `docker compose down -v` (удалит данные).
+Однократный сервис `prepare` применяет миграции, загружает справочники и демонстрационные данные до запуска API и бота. При повторном запуске операции идемпотентны. Сервис `maintenance` ежедневно удаляет данные с истёкшим сроком хранения. PostgreSQL хранит данные в volume `pgdata`. Для полной очистки демо-БД выполните `docker compose down -v` (удалит данные).
 
-Без `TELEGRAM_BOT_TOKEN` контейнер бота остаётся в standby и не мешает сайту/API. Чтобы включить его, получите токен у `@BotFather`, укажите `TELEGRAM_BOT_TOKEN=...` в `.env` и перезапустите `docker compose up -d bot`. Не добавляйте `.env` в Git. Порты можно изменить через `WEB_PORT`, `API_PORT`, `POSTGRES_PORT` (по умолчанию 5433 на хосте); параметры БД — через `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`.
+Без `TELEGRAM_BOT_TOKEN` контейнер бота остаётся в standby и не мешает сайту/API. Чтобы включить его, получите токен у `@BotFather`, укажите `TELEGRAM_BOT_TOKEN=...` в `.env` и перезапустите `docker compose up -d bot`. Не добавляйте `.env` в Git. PostgreSQL и API доступны с хоста только через `127.0.0.1`; сайт публикуется на `WEB_PORT`. Для смены портов используйте `WEB_PORT`, `API_PORT`, `POSTGRES_PORT`.
+
+Для веб-админки задайте `ADMIN_PASSWORD` текстом в локальном `.env`. Отдельный `ADMIN_SECRET` не требуется: сессии используют уже заданный `RATE_LIMIT_SECRET`. Если позднее понадобится хранить хеш, вместо `ADMIN_PASSWORD` можно задать `ADMIN_PASSWORD_HASH` командой `python -m src.cli hash-password`. Необязательная роль модератора настраивается через `MODERATOR_USERNAME` и `MODERATOR_PASSWORD`; она может менять события и заявки, но не импортировать файлы и не читать журнал. Задайте `WEB_ORIGIN` равным публичному адресу сайта. Для HTTP на локальном компьютере задайте `ADMIN_COOKIE_SECURE=false`; за HTTPS оставьте `true`. Выход отзывает сессию в БД, смена пароля или секрета делает прежние сессии недействительными.
+
+Подготовка БД создаёт роли `afisha_api`, `afisha_bot` и `afisha_maintenance` с отдельными паролями из `.env`. После смены любого из них запустите `docker compose up --force-recreate prepare api bot maintenance`. Пароль владельца схемы остаётся только у `prepare`.
+
+Импорт ограничен 2 МиБ и 2000 записями по умолчанию. Сроки хранения: подписки — 180 суток, заявки, сырой импорт и отчёты — 365 суток, журнал — 730 суток. Значения задаются переменными из `.env.example`.
 
 ## Проверки и тесты
 
 ```bash
+python3 -m pip install -r requirements-dev.txt
 python3 -m pytest -q
 # Опционально: PostgreSQL-тесты в отдельной тестовой БД, не в рабочем контейнере:
 TEST_POSTGRES_URL='postgresql://user:password@localhost:5432/afisha_test' python3 -m pytest -q
@@ -106,6 +119,9 @@ cd frontend && npm ci && npm run lint && npm run typecheck && npm test && npm ru
 ```bash
 # 1. Прогон всех автоматических тестов
 PYTHONPATH=. python3 -m unittest discover -s tests -v
+
+# Перед первым локальным запуском подготовьте БД и демоданные отдельно
+PYTHONPATH=. python3 -m src.bootstrap prepare --seed-demo
 
 # 2. Проверка выполнения всех 6 метрик качества Раздела 9.1 ТЗ
 PYTHONPATH=. python3 -m src.cli metrics
@@ -165,4 +181,4 @@ PYTHONPATH=. python3 -m src.cli audit-log --limit 15
 ## Ограничения
 
 1. Каталог использует подготовленный набор событий; автоматический сбор внешних афиш и геосервис в этот запуск не входят.
-2. Административные секреты по умолчанию не заданы. Для использования админских операций задайте уникальные `ADMIN_PASSWORD` и `ADMIN_SECRET` в `.env`.
+2. Пароль администратора по умолчанию не задан. Для использования админских операций настройте `ADMIN_PASSWORD` в `.env`.

@@ -58,6 +58,9 @@ class Database:
             self._memory_conn.close()
             self._memory_conn = None
 
+    def ping(self) -> None:
+        self.fetchone("SELECT 1 AS ready")
+
     def _adapt_sql(self, sql: str) -> str:
         if self.is_postgres:
             return sql.replace("?", "%s")

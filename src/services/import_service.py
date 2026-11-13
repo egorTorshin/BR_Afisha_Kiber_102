@@ -1,10 +1,13 @@
 import csv
 import io
 import json
+import math
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 from src.db.connection import Database
 from src.models.schemas import (
     EventRecord,
@@ -33,9 +36,43 @@ class ImportService:
     """
 
     REQUIRED_FIELDS = ("title", "category", "date_start", "city", "venue", "address", "description", "source_url")
+    MAX_IMPORT_BYTES = 2 * 1024 * 1024
+    MAX_IMPORT_ROWS = 2000
+    FIELD_LIMITS = {"title": 250, "category": 100, "city": 120, "venue": 250,
+                    "address": 500, "description": 10000, "language": 100,
+                    "source_url": 2048, "org_link": 2048, "dispute_reason": 1000}
 
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, *, max_import_bytes: int = MAX_IMPORT_BYTES,
+                 max_import_rows: int = MAX_IMPORT_ROWS) -> None:
         self.db = db
+        self.max_import_bytes = max_import_bytes
+        self.max_import_rows = max_import_rows
+
+    @staticmethod
+    def _valid_url(value: str, field: str) -> str:
+        if len(value) > 2048 or any(c.isspace() or ord(c) < 32 or c in {'<', '>', '"', "'", '\\'} for c in value):
+            raise ValueError(f"Некорректный URL в поле {field}")
+        try:
+            parsed = urlsplit(value)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError()
+            if parsed.port is not None and not 1 <= parsed.port <= 65535:
+                raise ValueError()
+        except ValueError:
+            raise ValueError(f"Некорректный URL в поле {field}") from None
+        return value
+
+    @staticmethod
+    def _search_fields(norm: Dict[str, Any]) -> Dict[str, str]:
+        tags = " ".join(norm["tags"])
+        return {
+            "search_city": normalize_text(norm["city"]),
+            "search_venue": normalize_text(norm["venue"]),
+            "search_language": normalize_text(norm["language"] or ""),
+            "search_tags": normalize_text(tags),
+            "search_text": normalize_text(" ".join((norm["title"], norm["description"], norm["venue"],
+                                                      norm["category"], tags, norm["language"] or ""))),
+        }
 
     def list_sources(self, event_id: str) -> List[EventSource]:
         return [EventSource(**row) for row in self.db.fetchall(
@@ -119,6 +156,12 @@ class ImportService:
         )
 
     def _validate_and_normalize(self, raw_item: Dict[str, Any], default_source_type: str = "импорт") -> Dict[str, Any]:
+        if not isinstance(raw_item, dict):
+            raise ValueError("Запись события должна быть объектом")
+        for field_name, max_length in self.FIELD_LIMITS.items():
+            value = raw_item.get(field_name)
+            if value is not None and len(str(value)) > max_length:
+                raise ValueError(f"Поле {field_name} превышает {max_length} символов")
         missing = []
         for req in self.REQUIRED_FIELDS:
             val = raw_item.get(req)
@@ -140,14 +183,16 @@ class ImportService:
         date_start = parse_iso_datetime(raw_item["date_start"])
         date_end_raw = raw_item.get("date_end")
         date_end = parse_iso_datetime(date_end_raw) if date_end_raw and str(date_end_raw).strip() else None
+        if date_end and date_end < date_start:
+            raise ValueError("Дата окончания не может быть раньше начала")
 
         duration_raw = raw_item.get("duration_min")
         duration_min: Optional[int] = None
         if duration_raw not in (None, ""):
             try:
                 duration_min = int(float(duration_raw))
-                if duration_min <= 0:
-                    raise ValueError("Длительность должна быть положительным числом")
+                if not 1 <= duration_min <= 1440:
+                    raise ValueError("Длительность должна быть от 1 до 1440 минут")
             except ValueError as e:
                 raise ValueError(f"Некорректная длительность duration_min: {duration_raw}") from e
 
@@ -157,12 +202,12 @@ class ImportService:
         address = str(raw_item["address"]).strip()
         description = str(raw_item["description"]).strip()
 
-        source_url = str(raw_item["source_url"]).strip()
-        if not (source_url.startswith("http://") or source_url.startswith("https://")):
-            raise ValueError(f"Поле source_url должно быть валидным URL (http/https): '{source_url}'")
+        source_url = self._valid_url(str(raw_item["source_url"]).strip(), "source_url")
 
         org_link_raw = raw_item.get("org_link")
         org_link = str(org_link_raw).strip() if org_link_raw and str(org_link_raw).strip() else None
+        if org_link:
+            org_link = self._valid_url(org_link, "org_link")
 
         price_min, price_max, is_free = parse_price_fields(
             raw_item.get("price_min"),
@@ -195,11 +240,17 @@ class ImportService:
             tags = [str(x).strip() for x in raw_tags if str(x).strip()]
         else:
             tags = []
+        if len(tags) > 20 or any(len(tag) > 100 for tag in tags):
+            raise ValueError("Допускается не более 20 тегов длиной до 100 символов")
 
         lat_raw = raw_item.get("lat")
         lon_raw = raw_item.get("lon")
         lat = float(lat_raw) if lat_raw not in (None, "") else None
         lon = float(lon_raw) if lon_raw not in (None, "") else None
+        if lat is not None and (not math.isfinite(lat) or not -90 <= lat <= 90):
+            raise ValueError("Некорректная широта")
+        if lon is not None and (not math.isfinite(lon) or not -180 <= lon <= 180):
+            raise ValueError("Некорректная долгота")
 
         language_raw = raw_item.get("language")
         language = str(language_raw).strip().lower() if language_raw and str(language_raw).strip() else "русский"
@@ -213,6 +264,8 @@ class ImportService:
             confidence = float(confidence_raw if confidence_raw not in (None, "") else 1.0)
         except ValueError:
             confidence = 0.7
+        if not math.isfinite(confidence):
+            raise ValueError("Некорректная уверенность извлечения")
         confidence = max(0.0, min(1.0, confidence))
 
         status = normalize_status(raw_item.get("status") or "published")
@@ -234,17 +287,23 @@ class ImportService:
         is_disputed = len(dispute_reasons) > 0
         dispute_reason = "; ".join(dict.fromkeys(dispute_reasons)) if is_disputed else None
 
-        source_hash = str(raw_item.get("source_hash") or compute_source_hash({
+        source_hash = compute_source_hash({
             "title": title,
             "date_start": date_start,
             "city": resolved_city,
             "venue": venue,
             "source_url": source_url,
-        }))
+        })
         dedup_key = compute_dedup_key(title, date_start, resolved_city, venue)
         event_id = str(raw_item.get("id") or uuid.uuid4())
+        if len(event_id) > 64 or not re.fullmatch(r"[A-Za-z0-9_-]+", event_id):
+            raise ValueError("Некорректный идентификатор события")
         now_iso = datetime.now(timezone.utc).isoformat()
         verified_at = str(raw_item.get("verified_at") or now_iso)
+        try:
+            datetime.fromisoformat(verified_at)
+        except ValueError:
+            raise ValueError("Некорректная дата проверки источника") from None
 
         return {
             "id": event_id,
@@ -358,6 +417,7 @@ class ImportService:
             source_changed = False
         now_iso = datetime.now(timezone.utc).isoformat()
         tags_json = json.dumps(norm["tags"], ensure_ascii=False)
+        search_fields = self._search_fields(norm)
 
         if not existing:
             self.db.execute(
@@ -368,14 +428,16 @@ class ImportService:
                     lat, lon, description, price_min, price_max, is_free,
                     age_limit, language, org_link, source_url, source_type,
                     source_hash, verified_at, confidence, status, dedup_key,
-                    is_disputed, dispute_reason, created_at, updated_at
+                    is_disputed, dispute_reason, created_at, updated_at,
+                    search_city, search_venue, search_language, search_tags, search_text
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?
                 )
                 """,
                 (
@@ -411,6 +473,7 @@ class ImportService:
                     norm["dispute_reason"],
                     now_iso,
                     now_iso,
+                    *search_fields.values(),
                 ),
             )
             self.save_source(norm["id"], norm, actor)
@@ -426,6 +489,7 @@ class ImportService:
         # Проверяем, изменились ли содержательные поля (идемпотентность при повторном импорте того же файла)
         values = {k: v for k, v in norm.items() if not k.startswith("_") and k != "id"}
         values["tags"] = tags_json
+        values.update(search_fields)
         for flag in ("is_free", "is_disputed"):
             values[flag] = int(values[flag])
         # Automatically generated verification timestamps do not make a repeat an update.
@@ -461,6 +525,8 @@ class ImportService:
         actor: str = "system",
         source_type: str = "импорт",
     ) -> ImportReport:
+        if len(records) > self.max_import_rows:
+            raise ValueError(f"Импорт ограничен {self.max_import_rows} записями")
         added = 0
         updated = 0
         unchanged = 0
@@ -495,7 +561,7 @@ class ImportService:
                 rejected += 1
                 rejected_reasons.append({
                     "row": idx,
-                    "title": str(raw_item.get("title", "<без названия>")),
+                    "title": str(raw_item.get("title", "<без названия>")) if isinstance(raw_item, dict) else "<без названия>",
                     "reason": str(exc),
                 })
 
@@ -558,6 +624,8 @@ class ImportService:
     def import_from_file(self, file_path: Path, actor: str = "moderator") -> ImportReport:
         if not file_path.exists():
             raise FileNotFoundError(f"Файл не найден: {file_path}")
+        if file_path.stat().st_size > self.max_import_bytes:
+            raise ValueError("Файл импорта слишком большой")
         suffix = file_path.suffix.lower()
         content = file_path.read_text(encoding="utf-8-sig")
         return self.import_from_content(content, filename=file_path.name, suffix=suffix, actor=actor)
@@ -568,7 +636,13 @@ class ImportService:
         filename: str,
         suffix: str,
         actor: str = "moderator",
+        max_rows: Optional[int] = None,
     ) -> ImportReport:
+        allowed_rows = min(max_rows, self.max_import_rows) if max_rows is not None else self.max_import_rows
+        if allowed_rows < 1:
+            raise ValueError("Некорректный лимит числа записей")
+        if len(content.encode("utf-8")) > self.max_import_bytes:
+            raise ValueError("Файл импорта слишком большой")
         if suffix == ".json":
             parsed = json.loads(content)
             if isinstance(parsed, dict) and "events" in parsed:
@@ -579,9 +653,15 @@ class ImportService:
                 raise ValueError("JSON-файл должен содержать массив объектов событий или ключ 'events'")
         elif suffix == ".csv":
             reader = csv.DictReader(io.StringIO(content))
-            records = [dict(row) for row in reader]
+            records = []
+            for row in reader:
+                if len(records) >= allowed_rows:
+                    raise ValueError("Превышено число записей импорта")
+                records.append(dict(row))
         else:
             raise ValueError(f"Неподдерживаемый формат файла '{suffix}'. Поддерживаются .csv и .json")
+        if not isinstance(records, list) or len(records) > allowed_rows:
+            raise ValueError("Превышено число записей импорта")
         return self.import_records(records, source_file=filename, actor=actor, source_type="импорт")
 
     def create_event_manual(self, data: Dict[str, Any], actor: str = "moderator") -> Tuple[str, EventRecord]:
@@ -629,6 +709,7 @@ class ImportService:
                       "city", "venue", "address", "lat", "lon", "description", "price_min", "price_max",
                       "is_free", "age_limit", "language", "org_link", "status")
             values = {k: norm[k] for k in fields}
+            values.update(self._search_fields(norm))
             values["tags"] = json.dumps(values["tags"], ensure_ascii=False)
             values["is_free"] = int(values["is_free"])
             diff = {k: {"old": previous[k], "new": values[k]} for k in fields if previous[k] != values[k]}

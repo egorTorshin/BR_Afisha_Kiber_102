@@ -28,12 +28,36 @@ def apply_migrations(db: Database, migrations_dir: Path) -> int:
             db.executescript(sql_file.read_text(encoding="utf-8"))
             if version == "002_admin_backend.sql":
                 _backfill_admin_data(db)
+            if version == "003_security_search.sql":
+                _backfill_search_data(db)
             db.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 (version, datetime.now(timezone.utc).isoformat()),
             )
             count += 1
     return count
+
+
+def _backfill_search_data(db: Database) -> None:
+    from src.services.normalizer import normalize_text
+
+    for row in db.fetchall("SELECT id, title, description, venue, city, category, tags, language FROM events"):
+        try:
+            tags = json.loads(row["tags"] or "[]")
+        except (TypeError, ValueError):
+            tags = []
+        tags_text = " ".join(str(tag) for tag in tags)
+        db.execute(
+            """UPDATE events SET search_city = ?, search_venue = ?, search_language = ?,
+               search_tags = ?, search_text = ? WHERE id = ?""",
+            (
+                normalize_text(row["city"]), normalize_text(row["venue"]),
+                normalize_text(row["language"] or ""), normalize_text(tags_text),
+                normalize_text(" ".join((row["title"], row["description"], row["venue"],
+                                          row["category"], tags_text, row["language"] or ""))),
+                row["id"],
+            ),
+        )
 
 
 def _make_prices_nullable(db: Database) -> None:

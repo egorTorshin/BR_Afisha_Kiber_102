@@ -13,6 +13,10 @@ class RateLimiter:
 
     def allow(self, user_key: str) -> bool:
         now = time.monotonic()
+        if len(self._buckets) > 10_000:
+            for key, bucket in list(self._buckets.items()):
+                if not bucket or now - bucket[-1] > self.window_seconds:
+                    del self._buckets[key]
         q = self._buckets[str(user_key)]
         while q and (now - q[0]) > self.window_seconds:
             q.popleft()

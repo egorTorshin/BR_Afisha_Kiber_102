@@ -190,7 +190,7 @@ def format_search_results(
     empty_explanation: Optional[str] = None,
 ) -> str:
     if total == 0 or not events:
-        return empty_explanation or "По вашему запросу подходящих событий не найдено."
+        return html.escape(empty_explanation) if empty_explanation else "По вашему запросу подходящих событий не найдено."
 
     start_num = filters.offset + 1
     end_num = filters.offset + len(events)

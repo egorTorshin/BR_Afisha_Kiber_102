@@ -1,15 +1,24 @@
+x-app-security: &app-security
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 256
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=64m
+
 services:
   db:
-    image: postgres:16-alpine
-    container_name: afisha_rb_db
+    image: postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-afisha_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-afisha_dev_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-afisha_db}
       POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=ru-RU"
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -18,27 +27,54 @@ services:
       timeout: 3s
       retries: 15
 
+  prepare:
+    <<: *app-security
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "src.bootstrap", "prepare", "--seed-demo"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-afisha_user}@db:5432/${POSTGRES_DB:-afisha_db}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      API_DB_PASSWORD: ${API_DB_PASSWORD:?Set API_DB_PASSWORD in .env}
+      BOT_DB_PASSWORD: ${BOT_DB_PASSWORD:?Set BOT_DB_PASSWORD in .env}
+      MAINTENANCE_DB_PASSWORD: ${MAINTENANCE_DB_PASSWORD:?Set MAINTENANCE_DB_PASSWORD in .env}
+
   api:
+    <<: *app-security
     build:
       context: .
       dockerfile: Dockerfile
     command: ["uvicorn", "src.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
+      prepare:
+        condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-afisha_user}:${POSTGRES_PASSWORD:-afisha_dev_password}@db:5432/${POSTGRES_DB:-afisha_db}
+      DATABASE_URL: postgresql://afisha_api@db:5432/${POSTGRES_DB:-afisha_db}
+      PGPASSWORD: ${API_DB_PASSWORD:?Set API_DB_PASSWORD in .env}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
       ADMIN_SECRET: ${ADMIN_SECRET:-}
+      MODERATOR_USERNAME: ${MODERATOR_USERNAME:-}
+      MODERATOR_PASSWORD: ${MODERATOR_PASSWORD:-}
+      MODERATOR_PASSWORD_HASH: ${MODERATOR_PASSWORD_HASH:-}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:${WEB_PORT:-3000}}
+      RATE_LIMIT_SECRET: ${RATE_LIMIT_SECRET:?Set RATE_LIMIT_SECRET in .env}
       ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       PUBLIC_CACHE_MAX_AGE: ${PUBLIC_CACHE_MAX_AGE:-60}
+      MAX_IMPORT_BYTES: ${MAX_IMPORT_BYTES:-2097152}
+      MAX_IMPORT_ROWS: ${MAX_IMPORT_ROWS:-2000}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       REFERENCE_DATE: ${REFERENCE_DATE:-}
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 5s
@@ -47,6 +83,7 @@ services:
       start_period: 20s
 
   frontend:
+    <<: *app-security
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -59,6 +96,9 @@ services:
     environment:
       API_BASE_URL: http://api:8000
       NODE_ENV: production
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+      - /app/.next/cache:rw,nosuid,nodev,size=64m
     ports:
       - "${WEB_PORT:-3000}:3000"
     healthcheck:
@@ -69,23 +109,40 @@ services:
       start_period: 15s
 
   bot:
+    <<: *app-security
     build: .
-    container_name: afisha_rb_bot
     restart: unless-stopped
     depends_on:
-      api:
-        condition: service_healthy
-    env_file:
-      - path: .env
-        required: false
+      prepare:
+        condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-afisha_user}:${POSTGRES_PASSWORD:-afisha_dev_password}@db:5432/${POSTGRES_DB:-afisha_db}
+      DATABASE_URL: postgresql://afisha_bot@db:5432/${POSTGRES_DB:-afisha_db}
+      PGPASSWORD: ${BOT_DB_PASSWORD:?Set BOT_DB_PASSWORD in .env}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-123456789}
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-30}
       SUBSCRIPTION_RETENTION_DAYS: ${SUBSCRIPTION_RETENTION_DAYS:-180}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       REFERENCE_DATE: ${REFERENCE_DATE:-}
+
+  maintenance:
+    <<: *app-security
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "src.bootstrap", "prune", "--loop"]
+    restart: unless-stopped
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://afisha_maintenance@db:5432/${POSTGRES_DB:-afisha_db}
+      PGPASSWORD: ${MAINTENANCE_DB_PASSWORD:?Set MAINTENANCE_DB_PASSWORD in .env}
+      SUBSCRIPTION_RETENTION_DAYS: ${SUBSCRIPTION_RETENTION_DAYS:-180}
+      FEEDBACK_RETENTION_DAYS: ${FEEDBACK_RETENTION_DAYS:-365}
+      RAW_RETENTION_DAYS: ${RAW_RETENTION_DAYS:-365}
+      IMPORT_REPORT_RETENTION_DAYS: ${IMPORT_REPORT_RETENTION_DAYS:-365}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-730}
 
 volumes:
   pgdata:

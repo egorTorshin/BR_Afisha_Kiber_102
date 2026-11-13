@@ -42,63 +42,11 @@ class SearchService:
             return None
         return self._record(row)
 
-    def _matches_python_postfilters(self, ev: EventRecord, filters: SearchFilters) -> bool:
-        # Независимая от локали СУБД проверка города, категории, площадки и языка на Python
-        if filters.city:
-            resolved_c = resolve_city(filters.city, db=self.db) or filters.city
-            if normalize_text(ev.city) != normalize_text(resolved_c):
-                return False
+    @staticmethod
+    def _like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
-        if filters.category:
-            resolved_cat = resolve_category(filters.category, db=self.db) or filters.category
-            if normalize_text(ev.category) != normalize_text(resolved_cat):
-                return False
-
-        if filters.venue:
-            if normalize_text(filters.venue) not in normalize_text(ev.venue):
-                return False
-
-        if filters.language:
-            if normalize_text(ev.language or "") != normalize_text(filters.language):
-                return False
-
-        # Фильтр по времени начала (например, после 19:00)
-        if filters.time_after:
-            ev_time = ev.date_start[11:16] if len(ev.date_start) >= 16 else "00:00"
-            if ev_time < filters.time_after:
-                return False
-
-        # Фильтр по времени окончания (например, не позже 20:00)
-        if filters.time_before:
-            end_str = ev.date_end or ev.date_start
-            ev_end_time = end_str[11:16] if len(end_str) >= 16 else "23:59"
-            if ev_end_time > filters.time_before:
-                return False
-
-        # Фильтр по длительности (например, не дольше 120 минут)
-        if filters.max_duration_min is not None and ev.duration_min is not None:
-            if ev.duration_min > filters.max_duration_min:
-                return False
-
-        # Фильтр по текстовому запросу (поиск в названии, описании, площадке и тегах)
-        if filters.query_text:
-            q_words = [w for w in normalize_text(filters.query_text).split() if len(w) >= 2]
-            haystack = normalize_text(
-                f"{ev.title} {ev.description} {ev.venue} {ev.category} {' '.join(ev.tags)} {ev.language or ''}"
-            )
-            for qw in q_words:
-                stem = qw[: max(3, len(qw) - 2)] if len(qw) >= 5 else qw
-                if qw not in haystack and stem not in haystack:
-                    return False
-
-        if filters.tag:
-            norm_tag = normalize_text(filters.tag)
-            if not any(norm_tag in normalize_text(t) for t in ev.tags):
-                return False
-
-        return True
-
-    def _query_candidates(self, filters: SearchFilters) -> List[EventRecord]:
+    def _query_sql(self, filters: SearchFilters) -> tuple[str, list[Any]]:
         clauses = ["status = ?", "merged_into IS NULL"]
         params: List[Any] = ["published"]
 
@@ -120,42 +68,63 @@ class SearchService:
             clauses.append("age_limit <= ?")
             params.append(filters.max_age_limit)
 
-        where_sql = " AND ".join(clauses)
-        sql = f"SELECT * FROM events WHERE {where_sql} ORDER BY date_start ASC, id ASC"
-        rows = self.db.fetchall(sql, params)
+        if filters.city:
+            city = resolve_city(filters.city, db=self.db) or filters.city
+            clauses.append("search_city = ?")
+            params.append(normalize_text(city))
+        if filters.category:
+            category = resolve_category(filters.category, db=self.db) or filters.category
+            clauses.append("category = ?")
+            params.append(normalize_text(category))
+        if filters.venue:
+            clauses.append("search_venue LIKE ? ESCAPE '\\'")
+            params.append(f"%{self._like(normalize_text(filters.venue))}%")
+        if filters.language:
+            clauses.append("search_language = ?")
+            params.append(normalize_text(filters.language))
+        if filters.tag:
+            clauses.append("search_tags LIKE ? ESCAPE '\\'")
+            params.append(f"%{self._like(normalize_text(filters.tag))}%")
+        if filters.time_after:
+            clauses.append("substr(date_start, 12, 5) >= ?")
+            params.append(filters.time_after)
+        if filters.time_before:
+            clauses.append("substr(COALESCE(date_end, date_start), 12, 5) <= ?")
+            params.append(filters.time_before)
+        if filters.max_duration_min is not None:
+            clauses.append("(duration_min IS NULL OR duration_min <= ?)")
+            params.append(filters.max_duration_min)
+        if filters.query_text:
+            for word in (w for w in normalize_text(filters.query_text).split() if len(w) >= 2):
+                stem = word[:max(3, len(word) - 2)] if len(word) >= 5 else word
+                clauses.append("search_text LIKE ? ESCAPE '\\'")
+                params.append(f"%{self._like(stem)}%")
 
-        seen_dedup = set()
-        results: List[EventRecord] = []
-        for r in rows:
-            ev = EventRecord.from_row(r)
-            if ev.dedup_key in seen_dedup:
-                continue
-            if not self._matches_python_postfilters(ev, filters):
-                continue
-            seen_dedup.add(ev.dedup_key)
-            results.append(ev)
-        return results
+        return " AND ".join(clauses), params
 
     def count_matching(self, filters: SearchFilters) -> int:
-        return len(self._query_candidates(filters))
+        where_sql, params = self._query_sql(filters)
+        return int(self.db.fetchone(f"SELECT COUNT(*) AS n FROM events WHERE {where_sql}", params)["n"])
 
     def search(self, filters: SearchFilters, *, sort: str = "date_asc") -> Tuple[List[EventRecord], int, Optional[str]]:
         """
         Выполняет поиск с пагинацией.
         Возвращает: (список событий на текущей странице, общее число подходящих событий, подсказка при пустом результате).
         """
-        all_matches = self._query_candidates(filters)
-        if sort == "date_desc":
-            all_matches.sort(key=lambda ev: (ev.date_start, ev.id), reverse=True)
-        elif sort == "price_asc":
-            def price_key(ev):
-                price = ev.price_min if ev.price_min is not None else ev.price_max
-                return (price is None, price if price is not None else 0, ev.date_start, ev.id)
-            all_matches.sort(key=price_key)
-        elif sort != "date_asc":
+        where_sql, params = self._query_sql(filters)
+        total = int(self.db.fetchone(f"SELECT COUNT(*) AS n FROM events WHERE {where_sql}", params)["n"])
+        order_by = {
+            "date_asc": "date_start ASC, id ASC",
+            "date_desc": "date_start DESC, id DESC",
+            "price_asc": "(COALESCE(price_min, price_max) IS NULL) ASC, COALESCE(price_min, price_max) ASC, date_start ASC, id ASC",
+        }.get(sort)
+        if order_by is None:
             raise ValueError("Недопустимая сортировка")
-        total = len(all_matches)
-        page = all_matches[filters.offset : filters.offset + filters.limit]
+        rows = self.db.fetchall(
+            f"SELECT * FROM events WHERE {where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?",
+            (*params, filters.limit, filters.offset),
+        )
+        page = [EventRecord.from_row(row) for row in rows]
         if page:
             by_id = {event.id: event for event in page}
             placeholders = ", ".join("?" for _ in page)
@@ -178,9 +147,9 @@ class SearchService:
 
         if filters.is_free_only or filters.max_price is not None:
             relaxed_price = replace(filters, is_free_only=False, max_price=None, offset=0)
-            cnt = len(self._query_candidates(relaxed_price))
+            cnt = self.count_matching(relaxed_price)
             if cnt > 0:
-                suggestions.append(f"снять ограничение по цене — найдётся событий: <b>{cnt}</b>")
+                suggestions.append(f"снять ограничение по цене — найдётся событий: {cnt}")
 
         if filters.date_from or filters.date_to or filters.date_preset or filters.time_after or filters.time_before:
             relaxed_date = replace(
@@ -192,35 +161,35 @@ class SearchService:
                 time_before=None,
                 offset=0,
             )
-            cnt = len(self._query_candidates(relaxed_date))
+            cnt = self.count_matching(relaxed_date)
             if cnt > 0:
-                suggestions.append(f"расширить дату и время поиска — найдётся событий: <b>{cnt}</b>")
+                suggestions.append(f"расширить дату и время поиска — найдётся событий: {cnt}")
 
         if filters.query_text:
             relaxed_text = replace(filters, query_text=None, offset=0)
-            cnt = len(self._query_candidates(relaxed_text))
+            cnt = self.count_matching(relaxed_text)
             if cnt > 0:
                 suggestions.append(
-                    f"убрать текстовое уточнение «{filters.query_text}» — в выбранных фильтрах есть другие события (<b>{cnt} шт.</b>)"
+                    f"убрать текстовое уточнение «{filters.query_text}» — в выбранных фильтрах есть другие события ({cnt} шт.)"
                 )
 
         if filters.category:
             relaxed_cat = replace(filters, category=None, offset=0)
-            cnt = len(self._query_candidates(relaxed_cat))
+            cnt = self.count_matching(relaxed_cat)
             if cnt > 0:
-                suggestions.append(f"выбрать «Все категории» вместо «{filters.category}» — найдётся событий: <b>{cnt}</b>")
+                suggestions.append(f"выбрать «Все категории» вместо «{filters.category}» — найдётся событий: {cnt}")
 
         if filters.max_age_limit is not None:
             relaxed_age = replace(filters, max_age_limit=None, offset=0)
-            cnt = len(self._query_candidates(relaxed_age))
+            cnt = self.count_matching(relaxed_age)
             if cnt > 0:
-                suggestions.append(f"ослабить возрастной фильтр {filters.max_age_limit}+ — найдётся событий: <b>{cnt}</b>")
+                suggestions.append(f"ослабить возрастной фильтр {filters.max_age_limit}+ — найдётся событий: {cnt}")
 
         if filters.city:
             relaxed_city = replace(filters, city=None, offset=0)
-            cnt = len(self._query_candidates(relaxed_city))
+            cnt = self.count_matching(relaxed_city)
             if cnt > 0:
-                suggestions.append(f"посмотреть события во всех городах РБ — найдётся событий: <b>{cnt}</b>")
+                suggestions.append(f"посмотреть события во всех городах РБ — найдётся событий: {cnt}")
 
         cancelled_note = ""
         if filters.date_from and filters.date_to and filters.date_from[:10] == filters.date_to[:10]:
@@ -232,20 +201,20 @@ class SearchService:
             if cancelled_rows:
                 c_row = cancelled_rows[0]
                 cancelled_note = (
-                    f"\n\n⚠️ <b>Обратите внимание:</b> мероприятие «{c_row['title']}» ({day_prefix}, г. {c_row['city']}) "
-                    f"было <b>ОТМЕНЕНО</b> и исключено из активной выдачи.\n"
+                    f"\n\n⚠️ Обратите внимание: мероприятие «{c_row['title']}» ({day_prefix}, г. {c_row['city']}) "
+                    f"было ОТМЕНЕНО и исключено из активной выдачи.\n"
                     f"Карточка события: /event_{c_row['id']}"
                 )
 
         base_msg = (
-            f"🔍 <b>По вашему запросу подходящих мероприятий не найдено</b>\n"
-            f"<i>Заданные условия: {desc}</i>{cancelled_note}"
+            f"🔍 По вашему запросу подходящих мероприятий не найдено\n"
+            f"Заданные условия: {desc}{cancelled_note}"
         )
         if suggestions:
             bullet_list = "\n".join(f"• {s}" for s in suggestions[:3])
-            return f"{base_msg}\n\n💡 <b>Рекомендация — какое ограничение можно ослабить:</b>\n{bullet_list}"
+            return f"{base_msg}\n\n💡 Рекомендация — какое ограничение можно ослабить:\n{bullet_list}"
         return (
-            f"{base_msg}\n\n💡 <b>Рекомендация:</b> сейчас в каталоге нет мероприятий с таким сочетанием параметров. "
+            f"{base_msg}\n\n💡 Рекомендация: сейчас в каталоге нет мероприятий с таким сочетанием параметров. "
             f"Нажмите «🔄 Сбросить фильтры» или выберите другой город и период."
         )
 
@@ -262,19 +231,17 @@ class SearchService:
         return rows
 
     def list_categories_with_counts(self, city: Optional[str] = None) -> List[Dict[str, Any]]:
-        all_published = self._query_candidates(SearchFilters(city=city, limit=1000))
-        counts: Dict[str, int] = {}
-        for ev in all_published:
-            counts[ev.category] = counts.get(ev.category, 0) + 1
-        return [
-            {"category": cat, "cnt": cnt}
-            for cat, cnt in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
-        ]
+        where_sql, params = self._query_sql(SearchFilters(city=city))
+        return self.db.fetchall(
+            f"SELECT category, COUNT(*) AS cnt FROM events WHERE {where_sql} "
+            "GROUP BY category ORDER BY cnt DESC, category ASC", params,
+        )
 
 
     def list_public_venues(self, city: Optional[str] = None) -> List[Dict[str, Any]]:
         # Read actual catalog values; do not manufacture dictionary IDs/coordinates.
-        events = self._query_candidates(SearchFilters(city=city))
-        venues = {(ev.city, ev.venue, ev.address) for ev in events}
-        return [{"city": city, "name": name, "address": address}
-                for city, name, address in sorted(venues)]
+        where_sql, params = self._query_sql(SearchFilters(city=city))
+        return self.db.fetchall(
+            f"SELECT DISTINCT city, venue AS name, address FROM events WHERE {where_sql} "
+            "ORDER BY city, name, address", params,
+        )

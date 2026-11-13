@@ -151,8 +151,7 @@ def test_request_id_is_used_by_existing_logger(client, monkeypatch):
 
 
 def test_admin_auth_cookies_csrf_and_moderation_cannot_be_bypassed(db, catalog):
-    settings = Settings(admin_username='reviewer', admin_password='test-password',
-                        admin_secret='test-signing-secret', admin_cookie_secure=True)
+    settings = Settings(admin_username='reviewer', admin_password='test-password', admin_cookie_secure=True)
     with TestClient(create_app(db, settings), base_url='https://testserver') as client:
         protected = ('/api/v1/admin/session', '/api/v1/admin/events',
                      '/api/v1/admin/moderation', '/api/v1/admin/audit',
@@ -189,8 +188,7 @@ def test_admin_auth_cookies_csrf_and_moderation_cannot_be_bypassed(db, catalog):
 
 
 def test_admin_cookies_support_local_http_without_disabling_production_security(db):
-    settings = Settings(admin_username='reviewer', admin_password='test-password',
-                        admin_secret='test-signing-secret', admin_cookie_secure=False)
+    settings = Settings(admin_username='reviewer', admin_password='test-password', admin_cookie_secure=False)
     with TestClient(create_app(db, settings), base_url='http://testserver') as client:
         login = client.post('/api/v1/admin/login', json={'username': 'reviewer', 'password': 'test-password'})
         assert login.status_code == 200

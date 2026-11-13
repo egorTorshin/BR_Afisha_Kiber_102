@@ -33,7 +33,8 @@ class FeedbackService:
             record = FeedbackRecord(str(uuid.uuid4()), event_id, message, "pending", datetime.now(timezone.utc).isoformat())
             self.db.execute("INSERT INTO feedback (id, event_id, message, status, created_at) VALUES (?, ?, ?, ?, ?)",
                             tuple(asdict(record).values()))
-            self.audit.log_audit(actor, "create_feedback", "feedback", record.id, asdict(record))
+            self.audit.log_audit(actor, "create_feedback", "feedback", record.id,
+                                 {"event_id": event_id, "status": record.status})
             return record
 
     def list_requests(self, status: Optional[str] = None, *, limit: int = 50, offset: int = 0) -> List[FeedbackRecord]:

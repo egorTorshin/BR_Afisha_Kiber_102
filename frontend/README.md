@@ -1,6 +1,6 @@
 # Культура Башкортостана — frontend
 
-Next.js App Router · TypeScript · Tailwind CSS. Самостоятельное приложение; Python backend, миграции и бот не изменяются.
+Next.js App Router · TypeScript · Tailwind CSS.
 
 ## Запуск
 
@@ -14,10 +14,11 @@ npm run dev
 Откройте http://localhost:3000. В отдельном терминале из корня проекта запустите FastAPI с локальной SQLite:
 
 ```sh
-DATABASE_URL=sqlite:///data/afisha_local.db .venv/bin/uvicorn src.api:create_app --factory --host 127.0.0.1 --port 8000
+DATABASE_URL=sqlite:///data/afisha_local.db python -m src.bootstrap prepare --seed-demo
+DATABASE_URL=sqlite:///data/afisha_local.db uvicorn src.api:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-Явное `DATABASE_URL=...` важно: в корневом `.env` адрес `db` предназначен для контейнеров Compose и не разрешается на Mac при локальном запуске Uvicorn. Локальный API сам применит миграции и загрузит сиды в `data/afisha_local.db`.
+Явное `DATABASE_URL=...` важно: в корневом `.env` адрес `db` предназначен для контейнеров Compose. Команда `prepare` применяет миграции и загружает сиды; API больше не меняет схему при старте.
 
 Если нужна локальная разработка с PostgreSQL, сначала поднимите БД командой `docker compose up -d db`, затем запустите API с `DATABASE_URL=postgresql://afisha_user:afisha_dev_password@127.0.0.1:5433/afisha_db` (или подставьте ваши значения Compose). Compose публикует PostgreSQL на хосте через порт 5433, чтобы не конфликтовать с локальным PostgreSQL на 5432. Для полного стенда используйте из корня `docker compose up --build`.
 

@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional
 import httpx
-from src.bot.router import BotRouter
+from src.bot.router import BotResponse, BotRouter
 from src.utils.logger import get_logger, log_event
 
 
@@ -70,7 +70,6 @@ class TelegramPollingRunner:
                 logging.WARNING,
                 "Could not initialize bot metadata on startup",
                 error_type=type(exc).__name__,
-                error=repr(exc),
             )
 
     async def _safe_delete_message(self, client: httpx.AsyncClient, chat_id: int, message_id: int) -> None:
@@ -190,22 +189,35 @@ class TelegramPollingRunner:
                 if "document" in msg:
                     doc = msg["document"]
                     file_name = doc.get("file_name", "import.csv")
-                    file_id = doc["file_id"]
-                    f_resp = await client.get(f"{self.base_url}/getFile", params={"file_id": file_id})
-                    f_data = f_resp.json()
-                    if f_data.get("ok"):
+                    max_bytes = self.router.import_service.max_import_bytes
+                    if not self.router.is_admin(user_id):
+                        bot_resp = self.router.handle_document_upload(user_id, file_name, "")
+                    elif int(doc.get("file_size") or 0) > max_bytes:
+                        bot_resp = BotResponse(text="❌ Файл импорта слишком большой.")
+                    else:
+                        f_resp = await client.get(f"{self.base_url}/getFile", params={"file_id": doc["file_id"]})
+                        f_resp.raise_for_status()
+                        f_data = f_resp.json()
+                        if not f_data.get("ok"):
+                            raise ValueError("Telegram не вернул путь к файлу")
                         file_path = f_data["result"]["file_path"]
-                        dl_resp = await client.get(f"{self.file_url}/{file_path}")
-                        content = dl_resp.content.decode("utf-8-sig", errors="replace")
-                        bot_resp = self.router.handle_document_upload(user_id, file_name, content)
-                        await self.send_new_screen(
-                            client,
-                            chat_id,
-                            bot_resp.text,
-                            bot_resp.reply_markup,
-                            bot_resp.parse_mode,
-                            delete_previous_bot_msg=False,
-                        )
+                        content_bytes = bytearray()
+                        async with client.stream("GET", f"{self.file_url}/{file_path}") as download:
+                            download.raise_for_status()
+                            async for chunk in download.aiter_bytes():
+                                content_bytes.extend(chunk)
+                                if len(content_bytes) > max_bytes:
+                                    break
+                        if len(content_bytes) > max_bytes:
+                            bot_resp = BotResponse(text="❌ Файл импорта слишком большой.")
+                        else:
+                            bot_resp = self.router.handle_document_upload(
+                                user_id, file_name, content_bytes.decode("utf-8-sig")
+                            )
+                    await self.send_new_screen(
+                        client, chat_id, bot_resp.text, bot_resp.reply_markup,
+                        bot_resp.parse_mode, delete_previous_bot_msg=False,
+                    )
                     return
 
                 text = msg.get("text", "")
@@ -225,7 +237,6 @@ class TelegramPollingRunner:
                 "Update processing failed",
                 update_id=upd.get("update_id"),
                 error_type=type(exc).__name__,
-                error=repr(exc),
             )
 
     async def run_forever(self) -> None:
@@ -265,7 +276,6 @@ class TelegramPollingRunner:
                         logging.WARNING,
                         "Polling network timeout, reconnecting immediately",
                         error_type=type(exc).__name__,
-                        error=repr(exc),
                     )
                     await asyncio.sleep(0.5)
                 except Exception as exc:
@@ -274,6 +284,5 @@ class TelegramPollingRunner:
                         logging.ERROR,
                         "Polling error",
                         error_type=type(exc).__name__,
-                        error=repr(exc),
                     )
                     await asyncio.sleep(2.0)

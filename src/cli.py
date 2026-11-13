@@ -6,7 +6,6 @@ from pathlib import Path
 from src.bot.formatter import format_event_card, format_import_report, format_search_results
 from src.config import load_settings
 from src.db.connection import Database
-from src.db.migrations import apply_migrations, seed_dictionaries
 from src.services.import_service import ImportService
 from src.services.normalizer import parse_free_text_query
 from src.services.search_service import SearchService
@@ -15,8 +14,6 @@ from src.services.search_service import SearchService
 def init_db_and_services():
     settings = load_settings()
     db = Database(settings.database_url)
-    apply_migrations(db, settings.migrations_dir)
-    seed_dictionaries(db, settings.data_dir / "dictionaries.json")
     return settings, db, ImportService(db), SearchService(db)
 
 
@@ -25,6 +22,9 @@ def main() -> int:
         description="CLI-инструмент управления каталогом и модерации «Афиша культуры Башкортостана» (Уровень 1)"
     )
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("prepare", help="Применить миграции и загрузить справочники")
+    sub.add_parser("prune", help="Удалить данные с истёкшим сроком хранения")
+    sub.add_parser("hash-password", help="Создать PBKDF2-хеш пароля администратора")
 
     # 1. import
     p_imp = sub.add_parser("import", help="Импорт событий из файла CSV или JSON")
@@ -72,6 +72,26 @@ def main() -> int:
     sub.add_parser("metrics", help="Расчёт и проверка всех метрик базового качества (Раздел 9.1 ТЗ)")
 
     args = parser.parse_args()
+    if args.command == "hash-password":
+        import getpass
+        from src.services.admin_auth import hash_password
+        password = getpass.getpass("Новый пароль: ")
+        if len(password) < 16:
+            parser.error("Пароль должен содержать не менее 16 символов")
+        print(hash_password(password))
+        return 0
+    if args.command in {"prepare", "prune"}:
+        from src.bootstrap import prepare, prune
+        settings = load_settings()
+        db = Database(settings.database_url)
+        try:
+            if args.command == "prepare":
+                prepare(db, settings)
+            else:
+                prune(db, settings)
+        finally:
+            db.close()
+        return 0
     settings, db, imp_service, search_service = init_db_and_services()
 
     if args.command == "import":
