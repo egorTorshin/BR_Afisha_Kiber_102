@@ -93,3 +93,28 @@ export interface ApiErrorBody {
   request_id: string;
   detail: string;
 }
+
+export interface AgentEventCard {
+  id: string;
+  title: string;
+  category: string;
+  date_start: string;
+  date_end: string | null;
+  city: string;
+  venue: string;
+  address: string;
+  price_min: number | null;
+  price_max: number | null;
+  is_free: boolean;
+  age_limit: number;
+  source_url: string;
+  org_link: string | null;
+}
+
+export interface AgentChatResponse {
+  message: string;
+  status: "ok" | "clarification" | "confirmation_required" | "no_data" | "fallback" | "error";
+  event_cards: AgentEventCard[];
+  conversation_id: string;
+  request_id: string;
+}

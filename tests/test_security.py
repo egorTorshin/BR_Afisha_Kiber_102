@@ -12,6 +12,7 @@ from src.services.feedback_service import FeedbackService
 from src.services.admin_auth import hash_password
 from src.services.import_service import ImportService
 from src.services.search_service import SearchService
+from src.services.subscription_service import SubscriptionService
 from src.models.schemas import SearchFilters
 from src.bot.router import BotRouter
 from src.bot.formatter import format_search_results
@@ -196,3 +197,15 @@ def test_bot_escapes_imported_and_query_text(db):
     _, total, explanation = SearchService(db).search(filters)
     rendered = format_search_results([], total, filters, empty_explanation=explanation)
     assert "&lt;i&gt;неизвестно&lt;/i&gt;" in rendered
+
+
+def test_subscription_inputs_are_bounded_and_command_prefixes_are_exact(db):
+    service = SubscriptionService(db)
+    with pytest.raises(ValueError):
+        service.subscribe("x" * 129, "Уфа", "концерт")
+    with pytest.raises(ValueError):
+        service.subscribe("user", "Уфа\nинъекция", "концерт")
+
+    router = BotRouter(db, Settings(rate_limit_secret="r" * 32))
+    response = router.handle_message("user", "/helpful")
+    assert "Справка по сервису" not in response.text

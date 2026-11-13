@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { ArrowDown, ArrowUpRight, ArrowRight, Sparkles } from "lucide-react";
 import { SearchBar, LoadingState } from "@/components/ui";
 import { EventPreview } from "@/components/event-preview";
+import { AgentChat } from "@/components/agent-chat";
 export const dynamic = "force-dynamic";
 import { api } from "@/lib/api";
 import { eventsHref } from "@/lib/event-query";
@@ -159,6 +160,9 @@ export default function Home() {
             }}
           />
         </Suspense>
+      </section>
+      <section className="container section agent-section" id="agent">
+        <AgentChat compact />
       </section>
       <section className="container about-strip">
         <Sparkles size={30} aria-hidden="true" />

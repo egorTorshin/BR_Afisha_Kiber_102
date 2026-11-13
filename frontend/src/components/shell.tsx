@@ -6,6 +6,7 @@ import { ArrowUpRight, Menu, X } from "lucide-react";
 const links = [
   { href: "/", label: "Главная" },
   { href: "/events", label: "Афиша событий" },
+  { href: "/agent", label: "Спросить агента" },
   { href: "/feedback", label: "Обратная связь" },
 ];
 export function Header() {

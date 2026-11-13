@@ -223,13 +223,21 @@ def run_quality_metrics(settings, db, imp_service: ImportService, search_service
     idempotent_ok = (rep2.added_count == 0 and rep2.rejected_count == 0 and rep2.unchanged_count == 100)
 
     print("=== ОТЧЁТ ПО МЕТРИКАМ БАЗОВОГО КАЧЕСТВА (РАЗДЕЛ 9.1 ТЗ) ===")
-    print(f"1. Заполненность карточек: {completeness_pct:.1f}% (порог >= 95%) -> {'OK' if completeness_pct >= 95 else 'FAIL'}")
-    print(f"2. Дубли в выдаче:         {dup_pct:.1f}% (порог <= 2%)  -> {'OK' if dup_pct <= 2 else 'FAIL'}")
-    print(f"3. Полнота поиска:         {recall_pct:.1f}% (порог >= 90%) -> {'OK' if recall_pct >= 90 else 'FAIL'}")
-    print(f"4. Пустая выдача:          {empty_rate_pct:.1f}% (порог <= 5%)  -> {'OK' if empty_rate_pct <= 5 else 'FAIL'}")
-    print(f"5. Скорость поиска (p95):  {p95_sec:.4f} с (порог <= 1.5 с) -> {'OK' if p95_sec <= 1.5 else 'FAIL'}")
-    print(f"6. Импорт 100 событий:     {import_success_pct:.1f}% без ошибок, идемпотентность={idempotent_ok} (порог 100%) -> {'OK' if import_success_pct == 100 and idempotent_ok else 'FAIL'}")
-    return 0
+    checks = {
+        "completeness": completeness_pct >= 95,
+        "duplicates": dup_pct <= 2,
+        "recall": recall_pct >= 90,
+        "empty_rate": empty_rate_pct <= 5,
+        "latency": p95_sec <= 1.5,
+        "import": import_success_pct == 100 and idempotent_ok,
+    }
+    print(f"1. Заполненность карточек: {completeness_pct:.1f}% (порог >= 95%) -> {'OK' if checks['completeness'] else 'FAIL'}")
+    print(f"2. Дубли в выдаче:         {dup_pct:.1f}% (порог <= 2%)  -> {'OK' if checks['duplicates'] else 'FAIL'}")
+    print(f"3. Полнота поиска:         {recall_pct:.1f}% (порог >= 90%) -> {'OK' if checks['recall'] else 'FAIL'}")
+    print(f"4. Пустая выдача:          {empty_rate_pct:.1f}% (порог <= 5%)  -> {'OK' if checks['empty_rate'] else 'FAIL'}")
+    print(f"5. Скорость поиска (p95):  {p95_sec:.4f} с (порог <= 1.5 с) -> {'OK' if checks['latency'] else 'FAIL'}")
+    print(f"6. Импорт 100 событий:     {import_success_pct:.1f}% без ошибок, идемпотентность={idempotent_ok} (порог 100%) -> {'OK' if checks['import'] else 'FAIL'}")
+    return 0 if all(checks.values()) else 1
 
 
 if __name__ == "__main__":

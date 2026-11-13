@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 from src.models.schemas import EventRecord, SearchFilters
+from src.agent.schemas import AgentEventCard
 
 
 def main_menu_keyboard(
@@ -273,6 +274,18 @@ def search_results_keyboard(
     rows.append([
         {"text": "⚙️ Фильтры / Меню", "callback_data": "menu:main"},
         {"text": "🔄 Сбросить", "callback_data": "menu:reset"},
+    ])
+    return {"inline_keyboard": rows}
+
+
+def agent_results_keyboard(cards: List[AgentEventCard]) -> Dict[str, Any]:
+    rows: List[List[Dict[str, str]]] = []
+    for idx, card in enumerate(cards, start=1):
+        title = card.title if len(card.title) <= 34 else card.title[:31] + "..."
+        rows.append([{"text": f"📌 {idx}. {title}", "callback_data": f"card:{card.id}"}])
+    rows.append([
+        {"text": "🔎 Новый запрос", "callback_data": "menu:main"},
+        {"text": "🏠 Главное меню", "callback_data": "menu:main"},
     ])
     return {"inline_keyboard": rows}
 

@@ -2,6 +2,7 @@ import html
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from src.models.schemas import EventRecord, ImportReport, SearchFilters
+from src.agent.schemas import AgentEventCard
 
 MONTHS_GENITIVE = {
     1: "января", 2: "февраля", 3: "марта", 4: "апреля",
@@ -214,6 +215,28 @@ def format_search_results(
         )
     items.append("👇 <i>Выберите событие кнопкой ниже для просмотра карточки и ссылок на билеты:</i>")
     return "\n\n".join(items)
+
+
+def format_agent_response(message: str, cards: List[AgentEventCard]) -> str:
+    """Render an agent answer using only fields grounded in returned event cards."""
+    lines = [html.escape(message)]
+    if not cards:
+        return "\n\n".join(lines)
+    lines.append("👇 <i>Выберите событие, чтобы открыть полную карточку:</i>")
+    for idx, card in enumerate(cards, start=1):
+        price = "🆓 Бесплатно" if card.is_free else (
+            f"от {card.price_min} ₽" if card.price_min is not None and card.price_max is None else
+            f"до {card.price_max} ₽" if card.price_min is None and card.price_max is not None else
+            f"{card.price_min}–{card.price_max} ₽" if card.price_min is not None and card.price_max is not None else
+            "Стоимость уточняется"
+        )
+        lines.append(
+            f"<b>{idx}. {html.escape(card.title)}</b> ({card.age_limit}+)\n"
+            f"   {category_badge(card.category)} • 💳 <b>{html.escape(price)}</b>\n"
+            f"   📅 {format_datetime_ru(card.date_start)}\n"
+            f"   📍 г. {html.escape(card.city)}, {html.escape(card.venue)}"
+        )
+    return "\n\n".join(lines)
 
 
 def format_subscriptions_list(subs: List[Dict[str, Any]]) -> str:

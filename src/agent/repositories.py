@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import MutableMapping, Protocol
@@ -116,9 +117,10 @@ class SqlAgentTraceRepository:
 class AgentSessionRepository:
     """Server-side anonymous browser sessions; raw bearer tokens never reach the database."""
 
-    def __init__(self, db: Database, ttl_days: int = 30):
+    def __init__(self, db: Database, ttl_days: int = 30, principal_secret: str = ""):
         self.db = db
         self.ttl = timedelta(days=ttl_days)
+        self.principal_secret = principal_secret
 
     @staticmethod
     def _digest(token: str) -> str:
@@ -135,6 +137,32 @@ class AgentSessionRepository:
 
     def create(self) -> tuple[str, str]:
         token = secrets.token_urlsafe(32)
+        conversation_id = secrets.token_hex(16)
+        now = utc_now()
+        self.db.execute(
+            "INSERT INTO agent_sessions (token_hash, conversation_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (self._digest(token), conversation_id, now.isoformat(), (now + self.ttl).isoformat()),
+        )
+        return token, conversation_id
+
+    def _principal_token(self, principal: str) -> str:
+        """Derive a stable opaque session token without storing a raw user identifier."""
+        if not self.principal_secret:
+            raise ValueError("principal_secret is required for persistent principal sessions")
+        normalized = str(principal).strip()[:256]
+        return hmac.new(
+            self.principal_secret.encode("utf-8"),
+            ("agent-principal:" + normalized).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    def get_or_create_principal(self, principal: str) -> tuple[str, str]:
+        """Return a stable server-side conversation for a trusted external principal."""
+        token = self._principal_token(principal)
+        conversation_id = self.resolve(token)
+        if conversation_id:
+            self.touch(token)
+            return token, conversation_id
         conversation_id = secrets.token_hex(16)
         now = utc_now()
         self.db.execute(

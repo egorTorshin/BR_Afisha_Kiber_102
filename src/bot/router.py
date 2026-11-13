@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from src.bot.formatter import (
+    format_agent_response,
     format_event_card,
     format_help_message,
     format_import_report,
@@ -11,6 +12,7 @@ from src.bot.formatter import (
     format_welcome_message,
 )
 from src.bot.keyboards import (
+    agent_results_keyboard,
     ages_keyboard,
     categories_keyboard,
     cities_keyboard,
@@ -25,6 +27,7 @@ from src.config import Settings
 from src.db.connection import Database
 from src.models.schemas import SearchFilters
 from src.services.import_service import ImportService
+from src.services.agent_service import AgentService
 from src.services.normalizer import parse_free_text_query, parse_iso_datetime, resolve_date_preset
 from src.services.search_service import SearchService
 from src.services.subscription_service import SubscriptionService
@@ -51,6 +54,7 @@ class BotRouter:
         self.import_service = ImportService(db, max_import_bytes=settings.max_import_bytes,
                                             max_import_rows=settings.max_import_rows)
         self.sub_service = SubscriptionService(db, retention_days=settings.subscription_retention_days)
+        self.agent_service = AgentService(db, settings)
         self.rate_limiter = RateLimiter(max_requests_per_minute=settings.rate_limit_per_minute)
         self.logger = get_logger("afisha_rb.bot", settings.log_level)
 
@@ -72,6 +76,10 @@ class BotRouter:
     def is_admin(self, user_id: str) -> bool:
         return str(user_id) in set(self.settings.admin_user_ids)
 
+    @staticmethod
+    def _is_command(text: str, command: str) -> bool:
+        return text == command or text.startswith(command + " ")
+
     def _build_main_menu_response(self, uid: str, prefix_notice: Optional[str] = None) -> BotResponse:
         filters = self.get_user_filters(uid)
         cnt = self.search_service.count_matching(filters)
@@ -92,6 +100,34 @@ class BotRouter:
         text = format_search_results(events, total, filters, empty_explanation=explanation)
         kb = search_results_keyboard(events, total, filters, is_subscribed=is_sub)
         return BotResponse(text=text, reply_markup=kb)
+
+    def _handle_agent_query(self, uid: str, text: str) -> BotResponse:
+        """Run a free-form query through the shared agent service.
+
+        In deterministic no-ai mode the legacy rich filter renderer remains the
+        presentation fallback, while the same request is still persisted and
+        traced by the agent pipeline.
+        """
+        _, conversation_id = self.agent_service.get_or_create_principal(f"telegram:{uid}")
+        result = self.agent_service.chat(
+            text,
+            conversation_id,
+            user_id=f"telegram:{uid}",
+        )
+        if self.settings.ai_mode == "no-ai" and result.status in {"ok", "fallback", "no_data"}:
+            parsed_filters = parse_free_text_query(
+                text,
+                ref_date=self.settings.get_reference_date(),
+                db=self.db,
+            )
+            if parsed_filters.is_empty():
+                parsed_filters.query_text = text
+            self._user_filters[uid] = parsed_filters
+            return self._execute_search_response(uid)
+        return BotResponse(
+            text=format_agent_response(result.response.message, result.response.event_cards),
+            reply_markup=agent_results_keyboard(result.response.event_cards),
+        )
 
     def handle_message(self, user_id: str, text: str) -> BotResponse:
         new_request_id()
@@ -118,7 +154,7 @@ class BotRouter:
 
         try:
             # 1. Обработка команд /start (включая deep-link /start event_<id>)
-            if clean_text.startswith("/start"):
+            if self._is_command(clean_text, "/start"):
                 parts = clean_text.split(maxsplit=1)
                 if len(parts) == 2 and parts[1].startswith("event_"):
                     ev_id = parts[1][len("event_"):]
@@ -126,10 +162,10 @@ class BotRouter:
                 self.reset_user_filters(uid)
                 return self._build_main_menu_response(uid)
 
-            if clean_text.startswith("/search"):
+            if self._is_command(clean_text, "/search"):
                 return self._execute_search_response(uid)
 
-            if clean_text.startswith("/help"):
+            if self._is_command(clean_text, "/help"):
                 filters = self.get_user_filters(uid)
                 cnt = self.search_service.count_matching(filters)
                 subs_cnt = len(self.sub_service.list_subscriptions(uid))
@@ -138,14 +174,14 @@ class BotRouter:
                     reply_markup=main_menu_keyboard(filters, matching_count=cnt, subs_count=subs_cnt),
                 )
 
-            if clean_text.startswith("/cancel"):
+            if self._is_command(clean_text, "/cancel"):
                 self.reset_user_filters(uid)
                 return self._build_main_menu_response(
                     uid,
                     prefix_notice="🔄 <b>Фильтры поиска сброшены.</b> Вы можете ввести новый запрос или выбрать параметры ниже:",
                 )
 
-            if clean_text.startswith("/unsubscribe"):
+            if self._is_command(clean_text, "/unsubscribe"):
                 removed = self.sub_service.unsubscribe_all(uid)
                 if removed > 0:
                     return self._build_main_menu_response(
@@ -157,7 +193,7 @@ class BotRouter:
                     prefix_notice="ℹ️ У вас не было активных подписок.",
                 )
 
-            if clean_text.startswith("/subscriptions"):
+            if self._is_command(clean_text, "/subscriptions"):
                 subs = self.sub_service.list_subscriptions(uid)
                 return BotResponse(
                     text=format_subscriptions_list(subs),
@@ -168,7 +204,7 @@ class BotRouter:
                 ev_id = clean_text[len("/event_"):].split()[0]
                 return self._open_card(uid, ev_id)
 
-            if clean_text.startswith("/admin"):
+            if self._is_command(clean_text, "/admin") or clean_text.startswith("/admin_"):
                 return self._handle_admin_command(uid, clean_text)
 
             # 2. Если пользователь вводит выбранную дату после нажатия кнопки «Указать дату»
@@ -177,16 +213,7 @@ class BotRouter:
                 return self._handle_custom_date_input(uid, clean_text)
 
             # 3. Свободный текст обрабатывается как поисковый запрос без возврата в меню (Раздел 6.2 ТЗ)
-            parsed_filters = parse_free_text_query(
-                clean_text,
-                ref_date=self.settings.get_reference_date(),
-                db=self.db,
-            )
-            if parsed_filters.is_empty():
-                parsed_filters.query_text = clean_text
-
-            self._user_filters[uid] = parsed_filters
-            return self._execute_search_response(uid)
+            return self._handle_agent_query(uid, clean_text)
 
         except Exception as exc:
             log_event(self.logger, logging.ERROR, "Error handling message", user_id=uid, error_type=type(exc).__name__)

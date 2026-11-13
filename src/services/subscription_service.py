@@ -16,10 +16,24 @@ class SubscriptionService:
         self.db = db
         self.retention_days = retention_days
 
+    @staticmethod
+    def _user_id(value: str) -> str:
+        cleaned = str(value or "").strip()
+        if not cleaned or len(cleaned) > 128 or any(ord(char) < 32 for char in cleaned):
+            raise ValueError("Некорректный идентификатор пользователя")
+        return cleaned
+
+    @staticmethod
+    def _label(value: str, fallback: str, max_length: int) -> str:
+        cleaned = str(value or fallback).strip()
+        if not cleaned or len(cleaned) > max_length or any(ord(char) < 32 for char in cleaned):
+            raise ValueError("Некорректный параметр подписки")
+        return cleaned
+
     def find_subscription(self, user_id: str, city: str, category: str) -> Optional[Dict[str, Any]]:
-        user_id_str = str(user_id).strip()
-        norm_city = normalize_text(city or "Все города")
-        norm_cat = normalize_text(category or "Все категории")
+        user_id_str = self._user_id(user_id)
+        norm_city = normalize_text(self._label(city, "Все города", 120))
+        norm_cat = normalize_text(self._label(category, "Все категории", 100))
         rows = self.db.fetchall("SELECT * FROM subscriptions WHERE user_id = ?", (user_id_str,))
         for r in rows:
             if normalize_text(r["city"]) == norm_city and normalize_text(r["category"]) == norm_cat:
@@ -34,9 +48,9 @@ class SubscriptionService:
         ) is not None
 
     def subscribe(self, user_id: str, city: str, category: str) -> Dict[str, Any]:
-        user_id_str = str(user_id).strip()
-        city_clean = (city or "Все города").strip()
-        cat_clean = (category or "Все категории").strip().lower()
+        user_id_str = self._user_id(user_id)
+        city_clean = self._label(city, "Все города", 120)
+        cat_clean = self._label(category, "Все категории", 100).lower()
 
         now = datetime.now(timezone.utc)
         expires = now + timedelta(days=self.retention_days)
@@ -96,20 +110,20 @@ class SubscriptionService:
         now_iso = datetime.now(timezone.utc).isoformat()
         return self.db.fetchall(
             "SELECT * FROM subscriptions WHERE user_id = ? AND expires_at >= ? ORDER BY created_at DESC",
-            (str(user_id).strip(), now_iso),
+            (self._user_id(user_id), now_iso),
         )
 
     def unsubscribe_all(self, user_id: str) -> int:
         """Отписка одной командой — полностью удаляет подписки пользователя из БД (Раздел 6.2, 10 ТЗ)."""
         return self.db.execute(
             "DELETE FROM subscriptions WHERE user_id = ?",
-            (str(user_id).strip(),),
+            (self._user_id(user_id),),
         )
 
     def unsubscribe_by_id(self, user_id: str, sub_id: str) -> int:
         return self.db.execute(
             "DELETE FROM subscriptions WHERE user_id = ? AND (id = ? OR id LIKE ?)",
-            (str(user_id).strip(), sub_id.strip(), f"{sub_id.strip()}%"),
+            (self._user_id(user_id), sub_id.strip(), f"{sub_id.strip()}%"),
         )
 
     def cleanup_expired(self) -> int:

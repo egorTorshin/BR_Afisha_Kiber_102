@@ -8,6 +8,7 @@ import type {
   FeedbackInput,
   FeedbackRecord,
   VenueItem,
+  AgentChatResponse,
 } from "./types";
 export class ApiError extends Error {
   constructor(
@@ -26,9 +27,9 @@ function query(values: object = {}) {
   });
   return params.size ? `?${params}` : "";
 }
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, timeoutMs = 10000): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const base =
       typeof window === "undefined"
@@ -83,4 +84,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  agentChat: (input: { message: string; conversation_id?: string }) =>
+    request<AgentChatResponse>(
+      "/api/v1/agent/chat",
+      { method: "POST", body: JSON.stringify(input) },
+      120000,
+    ),
 };

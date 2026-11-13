@@ -10,7 +10,7 @@ from src.utils.logger import get_logger, log_event
 def bootstrap() -> tuple:
     settings = load_settings()
     logger = get_logger("afisha_rb.main", settings.log_level)
-    log_event(logger, logging.INFO, "Bootstrapping Afisha Bashkortostan service (Level 1)")
+    log_event(logger, logging.INFO, "Bootstrapping Afisha Bashkortostan bot and agent service")
 
     db = Database(settings.database_url)
     db.fetchone("SELECT 1 AS ready")
