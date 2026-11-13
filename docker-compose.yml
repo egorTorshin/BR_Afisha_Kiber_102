@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: afisha_rb_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-afisha_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-afisha_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-afisha_db}
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=ru-RU"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-afisha_user} -d ${POSTGRES_DB:-afisha_db}"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  bot:
+    build: .
+    container_name: afisha_rb_bot
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://afisha_user:afisha_pass@db:5432/afisha_db}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-123456789}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-30}
+      SUBSCRIPTION_RETENTION_DAYS: ${SUBSCRIPTION_RETENTION_DAYS:-180}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REFERENCE_DATE: ${REFERENCE_DATE:-2026-11-13}
+
+volumes:
+  pgdata:
