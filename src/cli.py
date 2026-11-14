@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import replace
@@ -19,6 +20,19 @@ def init_db_and_services():
     return settings, db, ImportService(db), SearchService(db)
 
 
+def init_sqlite_services(database_url: str):
+    if not database_url.startswith("sqlite:///"):
+        raise ValueError("Для изолированного запуска collect-gkz разрешена только SQLite")
+    database_path = Path(database_url[len("sqlite:///"):]).resolve()
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    if not database_path.is_relative_to(temp_root):
+        raise ValueError(f"Путь SQLite должен находиться во временном каталоге {temp_root}")
+    settings = load_settings()
+    settings.database_url = database_url
+    db = Database(database_url)
+    return settings, db, ImportService(db), SearchService(db)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="CLI-инструмент управления каталогом и модерации «Афиша культуры Башкортостана» (Уровень 1)"
@@ -27,6 +41,12 @@ def main() -> int:
     sub.add_parser("prepare", help="Применить миграции и загрузить справочники")
     sub.add_parser("prune", help="Удалить данные с истёкшим сроком хранения")
     sub.add_parser("hash-password", help="Создать PBKDF2-хеш пароля администратора")
+    p_gkz = sub.add_parser("collect-gkz", help="Однократно собрать события с сайта ГКЗ")
+    p_gkz.add_argument("--timeout", type=float, default=15.0, help="Таймаут HTTP-запроса в секундах")
+    p_gkz.add_argument("--retries", type=int, default=2, help="Число повторов временных сетевых ошибок")
+    p_gkz.add_argument("--actor", default="gkz_collector", help="Инициатор записи в журнал аудита")
+    p_gkz.add_argument("--dry-run", action="store_true", help="Загрузить и проверить страницу без подключения к БД")
+    p_gkz.add_argument("--database-url", help="Явный SQLite URL для изолированного импорта")
 
     # 1. import
     p_imp = sub.add_parser("import", help="Импорт событий из файла CSV или JSON")
@@ -99,7 +119,48 @@ def main() -> int:
         finally:
             db.close()
         return 0
-    settings, db, imp_service, search_service = init_db_and_services()
+    if args.command == "collect-gkz" and args.dry_run:
+        from src.services.gkz_collector import GKZCollector
+        try:
+            collector = GKZCollector(timeout=args.timeout, retries=args.retries)
+        except ValueError as exc:
+            parser.error(str(exc))
+        try:
+            result = collector.dry_run()
+        finally:
+            collector.close()
+        print(result.message)
+        if result.stats:
+            stats = result.stats
+            print(f"HTTP: {stats.get('http_status', '—')}; HTML: {stats.get('html_bytes', 0)} байт; карточек: {stats.get('cards_found', 0)}; разобрано: {stats.get('parsed', 0)}; отклонено: {stats.get('rejected', 0)}")
+            for item in stats.get("rejected_reasons", []):
+                print(f"Отклонение ({item['title']}): {item['reason']}")
+        return 0 if result.ok else 1
+
+    if args.command == "collect-gkz" and args.database_url:
+        try:
+            settings, db, imp_service, search_service = init_sqlite_services(args.database_url)
+        except ValueError as exc:
+            parser.error(str(exc))
+    else:
+        settings, db, imp_service, search_service = init_db_and_services()
+
+    if args.command == "collect-gkz":
+        from src.services.gkz_collector import GKZCollector
+        try:
+            collector = GKZCollector(timeout=args.timeout, retries=args.retries)
+        except ValueError as exc:
+            parser.error(str(exc))
+        try:
+            result = collector.collect(imp_service, actor=args.actor)
+        finally:
+            collector.close()
+            if args.database_url:
+                db.close()
+        print(result.message)
+        if result.report:
+            print(format_import_report(result.report))
+        return 0 if result.ok else 1
 
     if args.command == "import":
         rep = imp_service.import_from_file(Path(args.file), actor=args.actor)

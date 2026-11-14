@@ -13,10 +13,26 @@ from src.db.roles import ROLE_TABLES
 from src.models.schemas import SearchFilters
 from src.services.import_service import ImportService
 from src.services.agent_service import AgentRunResult
-from src.services.normalizer import parse_free_text_query, resolve_city
+from src.services.normalizer import parse_free_text_query, resolve_city, classify_geography
 from src.services.search_service import SearchService
 from src.services.subscription_service import SubscriptionService
 from src.utils.logger import anonymize_user_id, scrub_pii
+
+
+def test_geography_classifies_city_region_and_unknown_without_guessing():
+    assert classify_geography("Стерлитамак", None) == ("city", "Стерлитамак")
+    assert classify_geography("Башкортостан", None) == ("region", None)
+    assert classify_geography("Bashkortostan", None) == ("region", None)
+    assert classify_geography("Казань", None) == ("unknown", "Казань")
+
+
+def test_region_mention_is_not_a_city_or_free_text_search_term():
+    for query in ("Что-нибудь интересное в Башкортостане", "Events in Bashkortostan"):
+        parsed = parse_free_text_query(query, ref_date=__import__("datetime").date(2026, 11, 14))
+        assert parsed.city is None
+        assert not parsed.query_text or not any(
+            term in parsed.query_text.casefold()
+            for term in ("башкортостан", "bashkortostan"))
 
 
 class TestAfishaLevel1(unittest.TestCase):
@@ -356,6 +372,23 @@ class TestAfishaLevel1(unittest.TestCase):
         self.assertIsNone(filters.query_text)
         self.assertEqual(filters.city, "Стерлитамак")
 
+    def test_agent_tool_null_text_does_not_become_telegram_filter(self) -> None:
+        self.settings.ai_mode = "local-ai"
+        result = AgentRunResult(
+            response=AgentResponse(message="Подобрал событие.", event_cards=[], trace_id="trace-null-text"),
+            status="ok", conversation_id="conversation-null-text", request_id="trace-null-text",
+        )
+        trace = SimpleNamespace(tool_calls=[ToolCall(name="search_events", arguments={
+            "city": "Уфа", "category": "концерт", "text": "None", "limit": 20,
+        })])
+        with (patch.object(self.router.agent_service, "get_or_create_principal", return_value=("token", "conversation-null-text")),
+              patch.object(self.router.agent_service, "chat", return_value=result),
+              patch.object(self.router.agent_service, "get_trace", return_value=trace)):
+            response = self.router.handle_message("user_null_text", "Какие концерты есть в Уфе?")
+
+        self.assertIsNone(self.router.get_user_filters("user_null_text").query_text)
+        self.assertNotIn("текст: «None»", response.text)
+
     def test_11_manual_filter_edit_reaches_next_agent_turn(self) -> None:
         uid = "user_followup"
         first = self.router.handle_message(uid, "Концерт в Уфе на выходных")
@@ -401,10 +434,12 @@ class TestAfishaLevel1(unittest.TestCase):
         uid = "relative-dialogue"
         self.router.handle_message(uid, "Концерт в Уфе 14 ноября до 1500 рублей")
         cid = self.router._agent_conversations[uid]
-        self.router.handle_message(uid, "подешевле")
+        cheaper = self.router.handle_message(uid, "подешевле")
         state = self.router.agent_service.dialogue_repo.get(cid)
         self.assertEqual(state.active_constraints.city, "Уфа")
-        self.assertLess(state.active_constraints.max_price, 1500)
+        # The initial search has no card to price against; an arbitrary ceiling is unsafe.
+        self.assertIn("Сначала укажите", cheaper.text)
+        self.assertEqual(state.active_constraints.max_price, 1500)
         self.router.handle_message(uid, "только бесплатные")
         state = self.router.agent_service.dialogue_repo.get(cid)
         self.assertTrue(state.active_constraints.is_free_only)

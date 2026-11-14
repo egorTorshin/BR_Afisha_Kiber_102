@@ -5,6 +5,7 @@ from datetime import date
 import pytest
 
 from src.agent.heavy_llm import HeavyLLMProvider, HeavyStep, OpenAIHeavyTransport
+from src.agent.diagnostics import InferenceRecorder, activate, deactivate
 from src.agent.schemas import ConstraintSet, ModelRoute, RoutingFeatures, ToolCall
 from src.agent.state import DialogueState, DialogueTurn
 from src.agent.tools import (SearchEventsInput, SearchEventsOutput, EventSummary,
@@ -92,6 +93,70 @@ def test_multi_step_query_and_trace():
     assert trace.tool_result_ids == [["e1", "e2"], ["e2"]]
     assert trace.tool_calls[1].arguments["max_price"] == 100
     assert AgentTrace.model_validate_json(trace.model_dump_json()) == trace
+
+
+def test_model_cannot_replace_inherited_filters_on_followup():
+    state = DialogueState(conversation_id="c", active_constraints=ConstraintSet(city="Уфа", category="концерт"),
+                          has_previous_results=True, last_result_ids=["e1"])
+    decision, transport, executed = setup(
+        [call(args={"city": "Салават", "category": "выставка"}), final(ids=["e1", "e2"])],
+        state=state, message="А в воскресенье?")
+    assert executed[0].city == "Уфа"
+    assert executed[0].category == "концерт"
+    assert '"last_result_ids"' in str(transport.messages[0])
+
+
+@pytest.mark.parametrize("region", ["Bashkortostan", "Башкортостан"])
+def test_model_cannot_turn_region_or_unrequested_place_into_city_filter(region):
+    _, _, executed = setup(
+        [call(args={"city": region, "category": "Для детей"}),
+         final(kind="no_data")],
+        message="Хочу сходить куда-нибудь с ребёнком.")
+    assert executed[0].city is None
+
+
+def test_model_cannot_invent_child_category_when_age_is_the_actual_filter():
+    _, _, executed = setup(
+        [call(args={"city": "Bashkortostan", "category": "Для детей"}),
+         final(kind="no_data")],
+        message="Хочу сходить куда-нибудь с ребёнком.")
+    assert executed[0].city is None
+    assert executed[0].category is None
+    assert executed[0].max_age_limit == 6
+
+
+def test_explicit_city_is_retained_in_heavy_search():
+    _, _, executed = setup(
+        [call(args={"city": "Стерлитамак"}), final(kind="no_data")],
+        message="Какие экскурсии есть в Стерлитамаке?")
+    assert executed[0].city == "Стерлитамак"
+
+
+def test_temporal_refinement_inherits_city_and_category_even_if_router_misses_context():
+    state = DialogueState(conversation_id="c",
+        active_constraints=ConstraintSet(city="Уфа", category="спектакль"),
+        has_previous_results=True, last_result_ids=["e1"])
+    _, _, executed = setup(
+        [call(args={"city": "Салават", "category": "кино", "date_from": "2026-11-14",
+                   "date_to": "2026-11-15"}), final(kind="no_data")],
+        state=state, message="На выходных")
+    assert executed[0].city == "Уфа"
+    assert executed[0].category == "спектакль"
+
+
+def test_unverified_final_id_records_grounding_failure_without_retaining_id():
+    recorder = InferenceRecorder("request", "session", 1)
+    recorder.record({"route": "HEAVY", "error_origin": None, "error_category": None})
+    token = activate(recorder)
+    try:
+        decision, _, _ = setup([call(), final(ids=["invented-id"])])
+    finally:
+        deactivate(token)
+    assert decision.stop_reason == "unverified_event_id"
+    assert recorder.rows[0]["error_origin"] == "agent_grounding"
+    assert recorder.rows[0]["error_category"] == "unverified_event_id"
+    assert recorder.rows[0]["reason_code"] == "unverified_event_id"
+    assert "invented-id" not in str(recorder.rows[0])
 
 
 def test_planner_and_comparison():

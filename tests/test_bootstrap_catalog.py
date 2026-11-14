@@ -13,7 +13,7 @@ def test_fresh_catalog_imports_all_records_and_restarts_without_duplicates(tmp_p
     settings = Settings(database_url=url, data_dir=ROOT / "data", migrations_dir=ROOT / "migrations")
     db = Database(url)
     try:
-        assert prepare(db, settings, seed_demo=True) == 2
+        assert prepare(db, settings, seed_demo=True) == 3
         assert db.fetchone("SELECT COUNT(*) AS n FROM events")["n"] == 120
         assert db.fetchone("SELECT COUNT(*) AS n FROM events WHERE status='published'")["n"] == 118
         assert db.fetchone("SELECT COUNT(*) AS n FROM event_sources")["n"] == 120

@@ -64,7 +64,17 @@ def test_simple_search_and_minimal_payload(registry):
     assert decision.schema_valid
     assert "secret history" not in str(transport.payload)
     assert "private-id" not in str(transport.payload)
-    assert set(transport.payload) == {"message", "current_date", "active_constraints", "has_previous_results", "next_search_offset"}
+    assert set(transport.payload) == {"message", "current_date", "active_constraints", "has_previous_results",
+                                      "next_search_offset", "last_result_ids", "shown_event_ids",
+                                      "selected_event_id", "pending_clarification", "last_user_intent"}
+
+
+def test_explicit_year_overrides_model_date(registry):
+    decision, _ = parse(registry, model_output(patch={"date_from": "2026-01-01", "date_to": "2026-01-01"}),
+                        message="Найди концерты в Уфе 1 января 2099 года")
+    assert not decision.requires_heavy
+    assert decision.proposed_call.arguments["date_from"] == "2099-01-01"
+    assert decision.proposed_call.arguments["date_to"] == "2099-01-01"
 
 
 def test_price_date_category_and_free_extraction(registry):
@@ -96,6 +106,15 @@ def test_more_results_uses_state_offset(registry):
     decision, _ = parse(registry, model_output(intent="more_results", args={"city": "Уфа", "is_free_only": False, "offset": 20}), state, "А ещё")
     assert not decision.requires_heavy
     assert decision.proposed_call.arguments["offset"] == 20
+
+
+def test_model_cannot_replace_inherited_city_on_followup(registry):
+    state = DialogueState(conversation_id="c", active_constraints=ConstraintSet(city="Уфа", category="концерт"),
+                          has_previous_results=True)
+    decision, _ = parse(registry, model_output(intent="refine_search",
+        patch={"city": "Салават", "category": "выставка"}), state, "А в воскресенье?")
+    assert decision.proposed_call.arguments["city"] == "Уфа"
+    assert decision.proposed_call.arguments["category"] == "концерт"
 
 
 def test_clarification(registry):

@@ -16,6 +16,7 @@ from src.agent.security import PolicyDecision
 from src.agent.state import DialogueState, DialogueTurn
 from src.agent.tools import ToolRegistry
 from src.agent.trace import AgentTrace
+from src.agent.diagnostics import InferenceRecorder, activate as activate_inference, deactivate as deactivate_inference
 from src.agent.repositories import (DialogueStateRepository, AgentTraceRepository,
                                     MemoryDialogueStateRepository, MemoryAgentTraceRepository)
 from src.config import Settings
@@ -28,6 +29,30 @@ from src.utils.logger import scrub_pii
 
 _YES = {"да", "подтверждаю", "подтвердить", "да, подтверждаю"}
 _NO = {"нет", "отмена", "отменить"}
+
+
+def _followup_kind(text: str) -> str | None:
+    """Only unambiguous short references are handled without model interpretation."""
+    clean = re.sub(r"[?.!,]+$", "", text.strip().casefold().replace("ё", "е")).strip()
+    if re.fullmatch(r"(?:а\s+)?еще", clean):
+        return "more_results"
+    if re.fullmatch(r"(?:а\s+)?(?:если\s+)?(?:в\s+)?другом\s+городе", clean):
+        return "other_city"
+    if re.fullmatch(r"(?:а\s+что\s+)?подешевле|(?:а\s+что\s+)?дешевле", clean):
+        return "cheaper"
+    if re.fullmatch(r"(?:давай\s+)?(?:в|на)\s+другой\s+день", clean):
+        return "other_day"
+    if re.fullmatch(r"(?:а\s+)?где\s+(?:оно|он|это|событие)\s+проходит", clean):
+        return "venue"
+    if re.fullmatch(r"(?:а\s+)?сколько\s+(?:это|он[оа]?)\s+стоит", clean):
+        return "price"
+    if re.fullmatch(r"(?:есть\s+что(?:-?нибудь)?\s+)?(?:на|в)\s+(?:этих\s+)?выходных|(?:на|в)\s+(?:эти\s+)?выходные", clean):
+        return "refine_search"
+    if re.fullmatch(r"(?:(?:а|покажи)\s+)?в\s+(?:уфе|стерлитамаке|салавате|нефтекамске|бирске|сибае|белорецке|ишимбае|октябрьском|туймазах)", clean):
+        return "refine_search"
+    if re.fullmatch(r"(?:а\s+)?в\s+(?:субботу|воскресенье|пятницу)|(?:для\s+)?ребенка\s+\d{1,2}\s+лет|только\s+бесплатн\w*|\d{1,2}\s+\w+", clean):
+        return "refine_search"
+    return None
 
 
 def _search_explanation(constraints: ConstraintSet | None) -> str:
@@ -95,11 +120,13 @@ class AgentOrchestrator:
 
     def run(self, request: AgentRequest, state: DialogueState | None = None) -> AgentResponse:
         started = time.perf_counter()
+        stage_latency: dict[str, int] = {}
         request_id = request.request_id or uuid.uuid4().hex
         state = state if state is not None else (self.state_repository.get(request.conversation_id)
             or DialogueState(conversation_id=request.conversation_id))
         if state.conversation_id != request.conversation_id:
             raise ValueError("conversation_id mismatch")
+        stage_latency["dialogue_state_resolution"] = round((time.perf_counter() - started) * 1000)
         context = self.registry.new_context()
         checked = self.registry.preprocess_input(request.message, dialogue_messages=len(state.turns), context=context)
         features = RoutingFeatureExtractor().extract(request.message, state, context.security_flags)
@@ -108,6 +135,8 @@ class AgentOrchestrator:
                            model_route=ModelRoute.LIGHT, model_name="none", latency_ms=0,
                            input_tokens=0, output_tokens=0, cost=0,
                            security_flags=context.security_flags)
+        inference_recorder = InferenceRecorder(request_id, request.conversation_id, len(state.turns) // 2 + 1)
+        inference_token = activate_inference(inference_recorder)
         calls: list[ToolCall] = []
         tool_ids: list[list[str]] = []
         basis: list[str] = []
@@ -123,6 +152,7 @@ class AgentOrchestrator:
         heavy_result_kind: str | None = None
         planner_handled = False
         normalized = request.message.strip().casefold().replace("ё", "е")
+        followup = _followup_kind(request.message)
 
         def execute(call: ToolCall, *, confirmed: bool = False):
             result = self.registry.execute(call.name, call.arguments, context=context, confirmed=confirmed)
@@ -157,6 +187,129 @@ class AgentOrchestrator:
             elif state.pending_confirmation and normalized in _NO:
                 state.pending_confirmation = None
                 stop, message = "confirmation_cancelled", "Действие отменено."
+            elif checked.decision == PolicyDecision.ALLOWED and followup and (
+                    followup != "refine_search" or state.has_previous_results or state.pending_clarification):
+                # This branch is shared by LIGHT, HEAVY and no-AI mode. The model cannot
+                # replace a known filter, invent a date or choose an arbitrary event ID.
+                trace.model_name = "deterministic_followup"
+                if followup == "other_day":
+                    state.active_constraints = state.active_constraints.model_copy(
+                        update={"date_from": None, "date_to": None})
+                    state.next_search_offset = 0
+                    state.pending_clarification = "На какую дату или период искать?"
+                    stop, message = "clarification", state.pending_clarification
+                elif followup == "other_city":
+                    state.pending_clarification = "Какой город искать?"
+                    stop, message = "clarification", state.pending_clarification
+                elif followup == "venue":
+                    event_id = state.selected_event_id or (
+                        state.last_result_ids[0] if len(state.last_result_ids) == 1 else None)
+                    if event_id is None:
+                        stop, message = "clarification", "Уточните, о каком мероприятии речь."
+                        state.pending_clarification = message
+                    else:
+                        result = execute(ToolCall(name="get_event", arguments={"event_id": event_id}))
+                        if result.error is None:
+                            event = result.payload["event"]
+                            basis = [event_id]
+                            state.selected_event_id = event_id
+                            message = f"«{event['title']}» проходит: {event['venue']}, {event['address']}."
+                        else:
+                            stop, message = "no_data", "Не удалось подтвердить место проведения мероприятия."
+                elif followup == "price":
+                    event_id = state.last_result_ids[0] if len(state.last_result_ids) == 1 else None
+                    if event_id is None:
+                        stop, message = "clarification", "Уточните, о каком мероприятии речь."
+                        state.pending_clarification = message
+                    else:
+                        result = execute(ToolCall(name="get_event", arguments={"event_id": event_id}))
+                        if result.error is None:
+                            event = result.payload["event"]
+                            basis = [event_id]
+                            state.selected_event_id = event_id
+                            if event["is_free"]:
+                                message = f"«{event['title']}» — бесплатно."
+                            elif event["price_min"] is None and event["price_max"] is None:
+                                message = f"Цена «{event['title']}» в каталоге не указана."
+                            elif event["price_max"] is not None and event["price_max"] != event["price_min"]:
+                                message = f"«{event['title']}» стоит от {event['price_min']} до {event['price_max']} ₽."
+                            else:
+                                message = f"«{event['title']}» стоит {event['price_min'] or event['price_max']} ₽."
+                        else:
+                            stop, message = "no_data", "Не удалось подтвердить цену мероприятия."
+                elif not state.has_previous_results and followup != "refine_search":
+                    stop, message = "clarification", "Сначала укажите, какие мероприятия искать."
+                    state.pending_clarification = message
+                elif followup == "refine_search":
+                    parsed = parse_free_text_query(request.message,
+                        ref_date=self.settings.get_reference_date(), db=getattr(self.search, "db", None))
+                    patch = {key: (value[:10] if key in {"date_from", "date_to"} else value)
+                             for key in ConstraintSet.model_fields
+                             if (value := getattr(parsed, key)) is not None and value is not False}
+                    if not patch:
+                        stop, message = "clarification", "Уточните дату, возраст или другое условие."
+                        state.pending_clarification = message
+                    else:
+                        constraints = ConstraintSet.model_validate({
+                            **state.active_constraints.model_dump(mode="json"), **patch})
+                        args = constraints.model_dump(mode="json", exclude_none=True)
+                        args["offset"] = 0
+                        search_call = ToolCall(name="search_events", arguments=args)
+                        result = execute(search_call)
+                        if result.error is None:
+                            basis = result.result_ids
+                            if not basis:
+                                stop, message = "no_data", "По уточнённым условиям мероприятий нет."
+                        else:
+                            stop, message = result.error.code, "Не удалось выполнить поиск."
+                elif followup == "cheaper":
+                    prices = [card.price_min for card in state.last_search_results
+                              if card.price_min is not None]
+                    if not prices and state.active_constraints.max_price is None:
+                        stop, message = "clarification", "Уточните мероприятие или цену для сравнения."
+                        state.pending_clarification = message
+                    else:
+                        previous = state.active_constraints
+                        ceiling = min(prices) - 1 if prices else previous.max_price - 1
+                        if previous.max_price is not None:
+                            ceiling = min(ceiling, previous.max_price - 1)
+                        constraints = previous.model_copy(update={"max_price": max(0, ceiling)})
+                        if ceiling < 0:
+                            stop, message = "no_data", "Дешевле бесплатных мероприятий вариантов нет."
+                        else:
+                            args = constraints.model_dump(mode="json", exclude_none=True)
+                            args.update({"offset": 0, "limit": 100})
+                            search_call = ToolCall(name="search_events", arguments=args)
+                            result = execute(search_call)
+                            if result.error is None:
+                                basis = [event_id for event_id in result.result_ids
+                                         if event_id not in state.shown_event_ids][:5]
+                                if not basis:
+                                    stop, message = "no_data", "Более дешёвых мероприятий с прежними условиями нет."
+                            else:
+                                stop, message = result.error.code, "Не удалось выполнить поиск."
+                else:  # more_results
+                    constraints = state.active_constraints
+                    offset = state.next_search_offset
+                    while len(basis) < 5 and context.calls_used < self.registry.policy.limits.max_tool_calls:
+                        args = constraints.model_dump(mode="json", exclude_none=True)
+                        args.update({"offset": offset, "limit": 20})
+                        search_call = ToolCall(name="search_events", arguments=args)
+                        result = execute(search_call)
+                        if result.error:
+                            stop, message = result.error.code, "Не удалось выполнить поиск."
+                            break
+                        for event_id in result.result_ids:
+                            offset += 1
+                            if event_id not in state.shown_event_ids and event_id not in basis:
+                                basis.append(event_id)
+                            if len(basis) == 5:
+                                break
+                        if len(basis) == 5 or not result.result_ids or offset >= result.payload["total"]:
+                            break
+                    state.next_search_offset = offset
+                    if not basis and stop == "completed":
+                        stop, message = "no_data", "Больше мероприятий по прежним условиям нет."
             elif features.intent == "planner" and not any(context.security_flags.model_dump().values()):
                 planner_handled = True
                 selected.append("deterministic_planner")
@@ -207,7 +360,9 @@ class AgentOrchestrator:
             else:
                 if state.pending_confirmation:
                     state.pending_confirmation = None
+                route_started = time.perf_counter()
                 decision = self.router.decide(features)
+                stage_latency["routing"] = round((time.perf_counter() - route_started) * 1000)
                 trace.router_decision = decision
                 trace.model_route = decision.route
                 if self.settings.ai_mode == "no-ai":
@@ -215,7 +370,9 @@ class AgentOrchestrator:
                 elif decision.router_error or (decision.fallback and decision.reason_code == "router_failure"):
                     fallback_reason = "jev_unavailable"
                 elif decision.route == ModelRoute.LIGHT:
+                    model_started = time.perf_counter()
                     light = self.light.parse(request.message, state)
+                    stage_latency["qwen_light"] = round((time.perf_counter() - model_started) * 1000)
                     selected.append(light.model_name)
                     trace.light_confidence = light.confidence
                     trace.light_proposed_tool = light.model_proposed_tool
@@ -244,7 +401,9 @@ class AgentOrchestrator:
                     else:
                         fallback_reason = "light_incomplete"
                 if trace.model_route == ModelRoute.HEAVY and fallback_reason is None and stop != "clarification":
+                    model_started = time.perf_counter()
                     heavy = self.heavy.run(request.message, state, context=context, stop_on_confirmation=True)
+                    stage_latency["qwen_heavy"] = round((time.perf_counter() - model_started) * 1000)
                     heavy_result_kind = heavy.result.kind
                     last_search_explanation = heavy.last_search_explanation
                     selected.append(heavy.model_name)
@@ -428,6 +587,7 @@ class AgentOrchestrator:
                     else:
                         stop, message = "model_unavailable", "Недостаточно данных для ответа. Уточните событие или запрос."
 
+            formatting_started = time.perf_counter()
             # Only IDs returned by successful tools in this request may be rendered.
             observed = {event_id for group in tool_ids for event_id in group}
             for event_id in dict.fromkeys(basis):
@@ -448,25 +608,47 @@ class AgentOrchestrator:
                 stop, message = "no_data", "Данные о найденных событиях недоступны."
             elif search_call and not cards and stop == "completed":
                 stop, message = "no_data", last_search_explanation or "По вашему запросу событий не найдено. Попробуйте расширить период или убрать фильтр города."
-            elif search_call and not cards and stop in {"fallback_search", "no_data"} and heavy_result_kind is None and not planner_handled:
+            elif search_call and not cards and stop in {"fallback_search", "no_data"} and heavy_result_kind is None and not planner_handled and not followup:
                 message = last_search_explanation or "По вашему запросу событий не найдено. Попробуйте расширить период или убрать фильтр города."
             elif cards:
-                if heavy_result_kind != "recommendation" and not planner_handled:
+                if heavy_result_kind != "recommendation" and not planner_handled and followup not in {"venue", "price"}:
                     message = _search_explanation(constraints)
                 stop = "completed" if stop == "completed" else stop
                 state.last_result_ids = [card.id for card in cards]
+                state.last_search_results = cards if search_call else state.last_search_results
+                if search_call:
+                    state.selected_event_id = cards[0].id if len(cards) == 1 else None
                 state.shown_event_ids = list(dict.fromkeys([*state.shown_event_ids, *state.last_result_ids]))
                 state.has_previous_results = True
                 if search_call:
-                    state.next_search_offset = int(search_call.arguments.get("offset", 0)) + len(cards)
+                    if followup != "more_results":
+                        state.next_search_offset = int(search_call.arguments.get("offset", 0)) + len(cards)
+            elif search_call and stop == "no_data":
+                state.last_search_results = []
             if constraints is not None and stop in {"completed", "fallback_search", "no_data",
                                                     "cannot_satisfy"}:
                 state.active_constraints = constraints
             if stop not in {"clarification", "confirmation_required"}:
                 state.pending_clarification = None
+            if checked.decision == PolicyDecision.ALLOWED:
+                state.last_user_intent = followup or features.intent
+            stage_latency["response_formatting"] = round((time.perf_counter() - formatting_started) * 1000)
         except Exception:
             stop, message = "internal_error", "Сервис временно недоступен. Попробуйте позже."
         finally:
+            trace.inference_diagnostics = inference_recorder.rows
+            stage_latency["tool_execution"] = round(context.tool_latency_ms)
+            stage_latency["jev_inference"] = sum(int(row.get("inference_latency_ms") or 0)
+                for row in inference_recorder.rows if row.get("route") == "ROUTER")
+            stage_latency["qwen_inference"] = sum(int(row.get("inference_latency_ms") or 0)
+                for row in inference_recorder.rows if row.get("route") in {"LIGHT", "HEAVY"})
+            stage_latency["json_pydantic_validation"] = sum(
+                int(row.get("structured_validation_latency_ms") or 0) +
+                int(row.get("json_validation_latency_ms") or 0)
+                for row in inference_recorder.rows) + round(context.tool_validation_latency_ms)
+            trace.stage_latency_ms = stage_latency
+            trace.llm_call_count = len(inference_recorder.rows)
+            deactivate_inference(inference_token)
             stored_message = (request.message if checked.decision == PolicyDecision.ALLOWED else
                               f"[отклонённый запрос: {checked.reason_code or 'policy'}]")
             state.turns.extend([DialogueTurn(role="user", content=stored_message),

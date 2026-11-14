@@ -63,9 +63,12 @@ class BotRouter:
     Обработчик команд, текстовых сообщений, инлайн-кнопок и загрузки файлов Telegram-бота (Раздел 6.2 ТЗ).
     """
 
-    def __init__(self, db: Database, settings: Settings) -> None:
+    def __init__(self, db: Database, settings: Settings, platform: str = "telegram") -> None:
         self.db = db
         self.settings = settings
+        if platform not in {"telegram", "max"}:
+            raise ValueError("Unsupported bot platform")
+        self.platform = platform
         self.search_service = SearchService(db)
         self.recommendation_service = RecommendationService(db)
         self.import_service = ImportService(db, max_import_bytes=settings.max_import_bytes,
@@ -88,6 +91,10 @@ class BotRouter:
             self._user_filters[uid] = SearchFilters()
         return self._user_filters[uid]
 
+    def _scope_user(self, user_id: str) -> str:
+        uid = str(user_id)
+        return uid if self.platform == "telegram" else f"max:{uid}"
+
     def reset_user_filters(self, user_id: str) -> SearchFilters:
         uid = str(user_id)
         self._user_filters[uid] = SearchFilters()
@@ -98,6 +105,8 @@ class BotRouter:
         return self._user_filters[uid]
 
     def is_admin(self, user_id: str) -> bool:
+        if self.platform != "telegram":
+            return False
         user = self.user_service.telegram_user(str(user_id), create=False)
         return str(user_id) in set(self.settings.admin_user_ids) or bool(user and user['role'] == 'admin')
 
@@ -193,7 +202,10 @@ class BotRouter:
             if (start, end) == (filters.date_from, filters.date_to):
                 filters.date_preset = preset
                 break
-        tool_text = str(args.get("text") or "")
+        raw_tool_text = args.get("text")
+        tool_text = raw_tool_text.strip() if isinstance(raw_tool_text, str) else ""
+        if tool_text.casefold() in {"none", "null"}:
+            tool_text = ""
         if tool_text and normalize_text(tool_text) != normalize_text(text):
             filters.query_text = scrub_pii(tool_text)[:200]
         self._user_filters[uid] = filters
@@ -217,7 +229,9 @@ class BotRouter:
         state.pending_confirmation = None
         state.pending_clarification = None
         state.last_result_ids = []
+        state.last_search_results = []
         state.shown_event_ids = []
+        state.selected_event_id = None
         state.has_previous_results = False
         state.next_search_offset = 0
         self.agent_service.dialogue_repo.save(state)
@@ -248,12 +262,12 @@ class BotRouter:
         Search state comes from the executed tool call and persisted dialogue.
         """
         try:
-            _, conversation_id = self.agent_service.get_or_create_principal(f"telegram:{uid}")
+            _, conversation_id = self.agent_service.get_or_create_principal(uid if uid.startswith("max:") else f"telegram:{uid}")
             self._sync_manual_filters_to_agent(uid, conversation_id)
             result = self.agent_service.chat(
                 text,
                 conversation_id,
-                user_id=f"telegram:{uid}",
+                user_id=uid if uid.startswith("max:") else f"telegram:{uid}",
             )
             self._agent_conversations[uid] = conversation_id
         except Exception:
@@ -273,9 +287,12 @@ class BotRouter:
 
     def handle_message(self, user_id: str, text: str) -> BotResponse:
         new_request_id()
-        uid = str(user_id)
+        uid = self._scope_user(user_id)
 
-        self.user_service.telegram_user(uid)
+        if self.platform == "telegram":
+            self.user_service.telegram_user(uid)
+        else:
+            self.user_service.external_user("max", str(user_id))
 
         if not self.rate_limiter.allow(uid):
             log_event(self.logger, logging.WARNING, "Rate limit exceeded", user_id=uid)
@@ -383,15 +400,16 @@ class BotRouter:
         return BotResponse(text=(notice + "\n\n" if notice else "") + text, reply_markup=profile_keyboard(profile))
 
     def handle_location(self, user_id: str, latitude: float, longitude: float) -> BotResponse:
-        self.profile_service.ensure(str(user_id))
-        self.profile_service.update(str(user_id), latitude=latitude, longitude=longitude)
-        language = self._language(str(user_id))
+        uid = self._scope_user(user_id)
+        self.profile_service.ensure(uid)
+        self.profile_service.update(uid, latitude=latitude, longitude=longitude)
+        language = self._language(uid)
         notice = {
             "ru": "✅ Геолокация сохранена. Она используется только для сортировки мероприятий по близости.",
             "en": "✅ Location saved. It is used only to sort events by distance.",
             "ba": "✅ Геолокация һаҡланды. Ул сараларҙы алыҫлыҡ буйынса теҙеү өсөн генә ҡулланыла.",
         }[language]
-        return self._profile_response(str(user_id), notice)
+        return self._profile_response(uid, notice)
 
     def _open_card(self, uid: str, event_id_or_prefix: str) -> BotResponse:
         ev = self.search_service.get_event_by_id(event_id_or_prefix, include_drafts=self.is_admin(uid))
@@ -400,8 +418,9 @@ class BotRouter:
                 uid,
                 prefix_notice="⚠️ Событие с указанным идентификатором не найдено в базе данных.",
             )
-        user = self.user_service.telegram_user(uid)
-        self.user_service.record_view(user['id'], ev.id, 'telegram')
+        user = (self.user_service.telegram_user(uid) if self.platform == "telegram"
+                else self.user_service.external_user("max", uid.removeprefix("max:")))
+        self.user_service.record_view(user['id'], ev.id, self.platform)
         profile = self.profile_service.get(uid)
         if profile and profile.get("latitude") is not None and profile.get("longitude") is not None:
             ev.distance_km = self.search_service.distance_km(profile["latitude"], profile["longitude"], ev)
@@ -413,7 +432,7 @@ class BotRouter:
 
     def handle_callback(self, user_id: str, callback_data: str) -> BotResponse:
         new_request_id()
-        uid = str(user_id)
+        uid = self._scope_user(user_id)
 
         if not self.rate_limiter.allow(uid):
             return BotResponse(
@@ -726,7 +745,7 @@ class BotRouter:
     def handle_document_upload(self, user_id: str, filename: str, content: str) -> BotResponse:
         """Импорт файла CSV/JSON через Telegram-бота для модератора (Раздел 3, 6.1, 6.2 ТЗ)."""
         new_request_id()
-        uid = str(user_id)
+        uid = self._scope_user(user_id)
         if not self.is_admin(uid):
             return BotResponse(
                 text="🔒 Загрузка файлов расписания доступна только модераторам сервиса."

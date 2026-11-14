@@ -162,7 +162,7 @@ class LightLLMProvider:
             message.casefold(),
         ) is not None
 
-        # No turns, conversation id, results, credentials, or registry internals cross this boundary.
+        # Only normalized semantic state crosses this boundary; no raw history or credentials.
         payload = {
             "message": re.sub(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "[email]",
                               re.sub(r"(?<!\d)(?:\+7|8)[\s(\d)-]{10,16}(?!\d)", "[phone]", message)),
@@ -170,6 +170,11 @@ class LightLLMProvider:
             "active_constraints": state.active_constraints.model_dump(mode="json", exclude_none=True),
             "has_previous_results": state.has_previous_results,
             "next_search_offset": state.next_search_offset,
+            "last_result_ids": state.last_result_ids,
+            "shown_event_ids": state.shown_event_ids[-20:],
+            "selected_event_id": state.selected_event_id,
+            "pending_clarification": state.pending_clarification,
+            "last_user_intent": state.last_user_intent,
         }
         if self.transport is not None:
             transport = self.transport
@@ -227,7 +232,9 @@ class LightLLMProvider:
                 return result("invalid_schema")
         confidence, intent = 1.0, output.intent
         model_proposed_tool = output.tool_proposal
-        if (not features.requires_temporal_reasoning and
+        deterministic = parse_free_text_query(message, ref_date=today or self.settings.get_reference_date(),
+                                              db=getattr(self.registry, "db", None))
+        if (not features.requires_temporal_reasoning and not deterministic.date_from and not deterministic.date_to and
                 (output.constraint_patch.date_from or output.constraint_patch.date_to)):
             return result("ambiguous_output")
         if intent in {"complex", "other"}:
@@ -242,8 +249,6 @@ class LightLLMProvider:
             return result("missing_previous_results")
         try:
             patch = output.constraint_patch.model_dump(exclude_none=True)
-            deterministic = parse_free_text_query(message, ref_date=today or self.settings.get_reference_date(),
-                                                  db=getattr(self.registry, "db", None))
             deterministic_patch = {
                 "city": deterministic.city,
                 "category": deterministic.category,
@@ -256,13 +261,22 @@ class LightLLMProvider:
                 "is_free_only": True if deterministic.is_free_only else None,
                 "max_age_limit": deterministic.max_age_limit,
             }
+            if re.search(r"\b(?:подешевле|дешевле)\b", message.casefold()) and not re.search(r"\d+\s*(?:руб|₽)", message.casefold()):
+                deterministic_patch["max_price"] = None
             # Existing deterministic normalization is authoritative for dimensions it recognizes;
             # the small model handles only the remaining patch dimensions.
             for key, value in deterministic_patch.items():
+                if key in {"date_from", "date_to"} and value is not None:
+                    patch[key] = value
                 if value is not None and key not in patch:
                     if key == "max_price" and deterministic.is_free_only:
                         continue
                     patch[key] = value
+            if features.requires_dialogue_context and state.has_previous_results:
+                inherited = state.active_constraints.model_dump(mode="json", exclude_none=True)
+                for key, old_value in inherited.items():
+                    if deterministic_patch.get(key) is None:
+                        patch[key] = old_value
             merged = {**state.active_constraints.model_dump(), **patch}
             constraints = ConstraintSet.model_validate(merged)
             if message.casefold().strip() == "подешевле" and (
@@ -275,7 +289,7 @@ class LightLLMProvider:
             offset = state.next_search_offset if intent == "more_results" else 0
             if intent == "more_results" and offset == 0:
                 return result("missing_previous_results")
-            if intent == "more_results" and patch:
+            if intent == "more_results" and output.constraint_patch.model_dump(exclude_none=True):
                 return result("ambiguous_output")
             args["offset"] = offset
             decision, parsed = self.registry.policy.check_tool(

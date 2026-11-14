@@ -247,9 +247,9 @@ def _table_exists(db, table):
 
 def test_fresh_baseline_is_atomic_and_repeatable(empty_db, tmp_path):
     db = empty_db
-    assert apply_migrations(db, MIGRATIONS) == 2
+    assert apply_migrations(db, MIGRATIONS) == 3
     assert apply_migrations(db, MIGRATIONS) == 0
-    assert {row["version"] for row in db.fetchall("SELECT version FROM schema_migrations")} == {"001_baseline.sql", "002_event_submissions.sql"}
+    assert {row["version"] for row in db.fetchall("SELECT version FROM schema_migrations")} == {"001_baseline.sql", "002_event_submissions.sql", "002_legacy_compat.sql"}
     columns = _columns(db, "bot_profiles")
     assert "phone" not in columns
     assert {"period_from", "period_to"}.issubset(_columns(db, "subscriptions"))

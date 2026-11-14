@@ -1,6 +1,7 @@
 """Allowlisted, typed application-service adapters for model callers."""
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import date
 from types import MappingProxyType
@@ -243,13 +244,24 @@ class ToolRegistry:
 
     def execute(self, name: str, arguments: Mapping[str, JsonValue] | BaseModel, *,
                 context: ToolExecutionContext | None = None, confirmed: bool = False) -> ToolResult:
+        started = time.perf_counter()
+        active = context if context is not None else self._default_context
+        try:
+            return self._execute(name, arguments, context=active, confirmed=confirmed)
+        finally:
+            active.tool_latency_ms += (time.perf_counter() - started) * 1000
+
+    def _execute(self, name: str, arguments: Mapping[str, JsonValue] | BaseModel, *,
+                 context: ToolExecutionContext | None = None, confirmed: bool = False) -> ToolResult:
         """Execute only after policy validation; confirmation is trusted call metadata, not a tool arg."""
         context = context if context is not None else self._default_context
         if context.input_decision is not None and context.input_decision.decision == PolicyDecision.REJECTED:
             decision, parsed = context.input_decision, None
         else:
+            validation_started = time.perf_counter()
             decision, parsed = self.policy.check_tool(name, arguments, calls_used=context.calls_used,
                                                        confirmed=confirmed)
+            context.tool_validation_latency_ms += (time.perf_counter() - validation_started) * 1000
         context.calls_used += 1
         if decision.decision != PolicyDecision.ALLOWED:
             context.security_events.append(SecurityEvent(tool_name=name or "<unknown>",
@@ -261,7 +273,12 @@ class ToolRegistry:
                                               else "Tool call rejected by security policy"))
         tool = self._definitions[name]
         try:
-            output = tool.output_schema.model_validate(tool.handler(parsed))
+            handler_output = tool.handler(parsed)
+            validation_started = time.perf_counter()
+            try:
+                output = tool.output_schema.model_validate(handler_output)
+            finally:
+                context.tool_validation_latency_ms += (time.perf_counter() - validation_started) * 1000
             payload = output.model_dump(mode="json")
             if "events" in payload:
                 payload["events"] = payload["events"][:self.policy.limits.max_tool_results]

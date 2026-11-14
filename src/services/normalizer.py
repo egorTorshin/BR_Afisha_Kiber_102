@@ -137,6 +137,24 @@ def resolve_city(raw_city: str, db: Optional[Database] = None) -> Optional[str]:
     return None
 
 
+def classify_geography(raw_value: str, db: Optional[Database] = None) -> Tuple[str, Optional[str]]:
+    """Classify a mention without coercing regions or unknown places into cities."""
+    norm = normalize_text(raw_value)
+    if not norm:
+        return "unknown", None
+    region_names = {
+        "башкортостан", "башкортостане", "республика башкортостан",
+        "республике башкортостан", "республику башкортостан",
+        "bashkortostan", "republic of bashkortostan",
+    }
+    if norm in region_names:
+        return "region", None
+    city = resolve_city(raw_value, db=db)
+    if city:
+        return "city", city
+    return "unknown", raw_value.strip()
+
+
 def resolve_category(raw_cat: str, db: Optional[Database] = None) -> Optional[str]:
     if not raw_cat:
         return None
@@ -404,13 +422,13 @@ def parse_free_text_query(text: str, ref_date: date, db: Optional[Database] = No
                 filters.max_price = 500
 
     # 6. Даты и периоды
-    m_dm_ru = re.search(r"\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b", low)
+    m_dm_ru = re.search(r"\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b(?:\s+(\d{4})(?:\s+года?)?\b)?", low)
     m_dmy = re.search(r"\b(\d{2})\.(\d{2})(?:\.(\d{4}))?\b", low)
     if m_dm_ru:
         mark_span(m_dm_ru)
         day_num = int(m_dm_ru.group(1))
         month_num = MONTHS_RU[m_dm_ru.group(2)]
-        target_d = date(ref_date.year, month_num, day_num)
+        target_d = date(int(m_dm_ru.group(3)) if m_dm_ru.group(3) else ref_date.year, month_num, day_num)
         filters.date_from = f"{target_d.isoformat()}T00:00:00"
         filters.date_to = f"{target_d.isoformat()}T23:59:59"
     elif m_dmy:
@@ -440,6 +458,13 @@ def parse_free_text_query(text: str, ref_date: date, db: Optional[Database] = No
                 filters.date_preset = preset_code
                 filters.date_from, filters.date_to = resolve_date_preset(preset_code, ref_date)
                 break
+
+    # A region is a geographic scope, never a city name or free-text event keyword.
+    m_region = re.search(
+        r"\b(?:республик(?:а|е|у)\s+башкортостан(?:а|е)?|башкортостан(?:а|е)?|"
+        r"republic\s+of\s+bashkortostan|bashkortostan)\b", low)
+    if m_region:
+        mark_span(m_region)
 
     # 7. Токенизация оставшегося текста для определения города, категории и ключевых слов
     # Вырезаем уже распознанные конструкции

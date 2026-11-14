@@ -155,7 +155,8 @@ class ImportService:
             ),
         )
 
-    def _validate_and_normalize(self, raw_item: Dict[str, Any], default_source_type: str = "импорт") -> Dict[str, Any]:
+    def _validate_and_normalize(self, raw_item: Dict[str, Any], default_source_type: str = "импорт",
+                                default_status: str = "published") -> Dict[str, Any]:
         if not isinstance(raw_item, dict):
             raise ValueError("Запись события должна быть объектом")
         for field_name, max_length in self.FIELD_LIMITS.items():
@@ -268,7 +269,7 @@ class ImportService:
             raise ValueError("Некорректная уверенность извлечения")
         confidence = max(0.0, min(1.0, confidence))
 
-        status = normalize_status(raw_item.get("status") or "published")
+        status = normalize_status(raw_item.get("status") or default_status)
 
         # Определение спорной карточки (Раздел 6.1: «обязательные поля заполнены, спорные помечены»)
         dispute_reasons: List[str] = []
@@ -524,6 +525,7 @@ class ImportService:
         source_file: str,
         actor: str = "system",
         source_type: str = "импорт",
+        default_status: str = "published",
     ) -> ImportReport:
         if len(records) > self.max_import_rows:
             raise ValueError(f"Импорт ограничен {self.max_import_rows} записями")
@@ -537,7 +539,8 @@ class ImportService:
 
         for idx, raw_item in enumerate(records, start=1):
             try:
-                norm = self._validate_and_normalize(raw_item, default_source_type=source_type)
+                norm = self._validate_and_normalize(raw_item, default_source_type=source_type,
+                                                    default_status=default_status)
                 with self.db.transaction():
                     self.db.lock_events()
                     raw_id = self._save_raw_event(raw_item, source_type, source_file, norm["source_hash"])

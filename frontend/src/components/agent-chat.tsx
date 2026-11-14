@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ArrowRight, Send } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type { AgentChatResponse, AgentEventCard } from "@/lib/types";
 import { cardTitle } from "@/lib/event-title";
 import { formatDate } from "./ui";
@@ -55,10 +55,16 @@ export function AgentChat({ compact = false }: { compact?: boolean }) {
     setCards([]);
     setPending(true);
     try {
-      const result: AgentChatResponse = await api.agentChat({
-        message: text,
-        conversation_id: conversationId,
-      });
+      let result: AgentChatResponse;
+      try {
+        result = await api.agentChat({ message: text, conversation_id: conversationId });
+      } catch (requestError) {
+        if (!(requestError instanceof ApiError && requestError.status === 403 &&
+          requestError.message === "Диалог недоступен" && conversationId)) throw requestError;
+        sessionStorage.removeItem("afisha-agent-search");
+        setConversationId(undefined);
+        result = await api.agentChat({ message: text });
+      }
       setConversationId(result.conversation_id);
       setCards(result.event_cards);
       setNote(result.event_cards.length ? undefined : result.message);

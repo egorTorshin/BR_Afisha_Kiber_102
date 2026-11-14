@@ -50,6 +50,8 @@ class ToolExecutionContext:
     """One context per agent request; keep it outside model-visible arguments."""
 
     calls_used: int = 0
+    tool_latency_ms: float = 0.0
+    tool_validation_latency_ms: float = 0.0
     input_decision: SecurityDecision | None = None
     security_flags: SecurityFlags = field(default_factory=SecurityFlags)
     security_events: list[SecurityEvent] = field(default_factory=list)

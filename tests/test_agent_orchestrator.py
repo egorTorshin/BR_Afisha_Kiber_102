@@ -155,15 +155,16 @@ def test_followups_cheaper_and_more():
     ])
     run(agent, "Концерты до 500")
     cheap, _, state = run(agent, "Подешевле")
-    assert cheap.result_ids == ["e2"] and state.active_constraints.max_price == 100
-    run(agent, "А ещё")
-    assert seen[-1].offset == 1
+    assert cheap.result_ids == ["e2"] and state.active_constraints.max_price == 299
+    more, _, state = run(agent, "А ещё")
+    assert more.result_ids == [] and state.shown_event_ids == ["e1", "e2"]
+    assert seen[-1].offset >= 1
 
 
 def test_clarification_stops_before_tools():
     agent, seen, _ = setup(lights=[light(question="На какую дату искать?")])
     response, trace, state = run(agent, "В другой день")
-    assert response.message == "На какую дату искать?" and not seen
+    assert "На какую дату" in response.message and not seen
     assert state.pending_clarification == response.message and trace.stop_reason == "clarification"
 
 

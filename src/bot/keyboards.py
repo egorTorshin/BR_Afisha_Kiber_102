@@ -3,7 +3,6 @@ from src.models.schemas import EventRecord, SearchFilters
 from src.bot.i18n import t
 from src.agent.schemas import AgentEventCard
 
-
 def language_keyboard() -> Dict[str, Any]:
     # One language per row makes the button clearly belong to its language.
     return {"inline_keyboard": [
@@ -24,9 +23,9 @@ def remove_reply_keyboard() -> Dict[str, Any]:
 
 def profile_keyboard(profile: Dict[str, Any]) -> Dict[str, Any]:
     return {"inline_keyboard": [
-        [{"text": "🇷🇺 Русский", "callback_data": "profile_lang:ru"},
-         {"text": "🇧🇦 Башҡортса", "callback_data": "profile_lang:ba"},
-         {"text": "🇬🇧 English", "callback_data": "profile_lang:en"}],
+        [{"text": "Русский", "callback_data": "profile_lang:ru"},
+         {"text": "Башҡортса", "callback_data": "profile_lang:ba"},
+         {"text": "English", "callback_data": "profile_lang:en"}],
         [{"text": "📍 Геолокация (сортировка рядом)", "callback_data": "profile:location"},
          {"text": "⭐ Любимые категории", "callback_data": "profile:categories"}],
         [{"text": "⬅️ В главное меню", "callback_data": "menu:main"}],

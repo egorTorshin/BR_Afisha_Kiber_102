@@ -1,0 +1,2 @@
+-- Engine-aware, data-preserving compatibility migration is applied by src.db.migrations.
+-- Adds nullable subscription period columns and permits MAX event-view channels.

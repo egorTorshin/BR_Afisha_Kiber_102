@@ -48,6 +48,9 @@ class AgentTrace(ContractModel):
     selected_models: list[str] = Field(default_factory=list)
     escalated: bool = False
     fallback_reason: str | None = None
+    inference_diagnostics: list[dict] = Field(default_factory=list)
+    stage_latency_ms: dict[str, int] = Field(default_factory=dict)
+    llm_call_count: int = Field(default=0, ge=0)
 
     def with_light_decision(self, decision: "LightDecision") -> "AgentTrace":
         """Attach safe Light metadata without storing prompt or raw model output."""

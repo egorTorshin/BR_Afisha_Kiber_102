@@ -1,12 +1,14 @@
 """Jev transport boundary. Only sanitized scalar routing features cross it."""
 
 import json
+import time
 from typing import Literal, Mapping
 
 import httpx
 from pydantic import Field, ValidationError
 
 from src.agent.schemas import ContractModel, ModelRoute, RoutingFeatures
+from src.agent.diagnostics import current as current_recorder, elapsed_ms
 
 
 ReasonCode = Literal[
@@ -69,13 +71,30 @@ class JevAdapter:
             raise ValueError("router payload has invalid scalar values")
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         if self.endpoint.rstrip("/").endswith("/decide"):
-            response = self.client.post(self.endpoint, json=safe_payload, headers=headers,
-                                        timeout=self.timeout_seconds)
-            response.raise_for_status()
+            started = time.perf_counter()
+            recorder = current_recorder()
+            index = recorder.record({"route": "ROUTER", "model_alias": self.model,
+                                     "schema_validation": "not_checked"}) if recorder else None
             try:
-                return JevDecision.model_validate(response.json())
+                response = self.client.post(self.endpoint, json=safe_payload, headers=headers,
+                                            timeout=self.timeout_seconds)
+                if recorder:
+                    recorder.update(index, inference_latency_ms=elapsed_ms(started),
+                                    http_status=response.status_code)
+                response.raise_for_status()
+                validation_started = time.perf_counter()
+                decision = JevDecision.model_validate(response.json())
+                if recorder:
+                    recorder.update(index, schema_validation="success",
+                                    structured_validation_latency_ms=elapsed_ms(validation_started))
+                return decision
             except (ValueError, TypeError, ValidationError) as exc:
+                if recorder:
+                    recorder.update(index, schema_validation="failure", error_category="router_schema_validation")
                 raise JevInvalidResponse() from exc
+            finally:
+                if recorder:
+                    recorder.update(index, latency_ms=elapsed_ms(started))
         request = {
             "model": self.model,
             "messages": [
@@ -89,14 +108,55 @@ class JevAdapter:
             "temperature": 0,
             "max_tokens": 96,
         }
-        response = self.client.post(self.endpoint, json=request, headers=headers,
-                                    timeout=self.timeout_seconds)
-        response.raise_for_status()
+        started = time.perf_counter()
+        recorder = current_recorder()
+        row = {"route": "ROUTER", "model_alias": self.model, "prompt_tokens": 0,
+               "completion_tokens": 0, "completion_length": 0, "finish_reason": None,
+               "http_status": None, "json_parse": "not_checked",
+               "schema_validation": "not_checked", "tool_name_validation": "not_applicable",
+               "tool_argument_validation": "not_applicable", "error_category": None}
+        index = recorder.record(row) if recorder else None
         try:
-            content = response.json()["choices"][0]["message"]["content"]
+            response = self.client.post(self.endpoint, json=request, headers=headers,
+                                        timeout=self.timeout_seconds)
+        except Exception:
+            if recorder:
+                recorder.update(index, latency_ms=elapsed_ms(started), error_category="transport_error")
+            raise
+        if recorder:
+            recorder.update(index, http_status=response.status_code)
+        try:
+            response.raise_for_status()
+            data = response.json()
+            choice = data["choices"][0]
+            content = choice["message"]["content"]
             if not isinstance(content, str):
                 raise ValueError("content must be JSON text")
-            return JevDecision.model_validate_json(content)
+            usage = data.get("usage") or {}
+            if recorder:
+                recorder.update(index, prompt_tokens=max(0, int(usage.get("prompt_tokens") or 0)),
+                                completion_tokens=max(0, int(usage.get("completion_tokens") or 0)),
+                                completion_length=len(content), finish_reason=choice.get("finish_reason"),
+                                json_parse="success")
+            result = JevDecision.model_validate_json(content)
+            if recorder:
+                recorder.update(index, schema_validation="success")
+            return result
+        except httpx.HTTPStatusError:
+            if recorder:
+                recorder.update(index, error_category="http_status")
+            raise
         except (ValueError, KeyError, IndexError, TypeError, ValidationError) as exc:
+            if recorder:
+                schema_error = isinstance(exc, ValidationError)
+                recorder.update(index, json_parse="success" if schema_error else "failure",
+                                schema_validation="failure" if schema_error else "not_checked",
+                                error_category="router_schema_validation" if schema_error else "router_parse")
+                if schema_error:
+                    parts = exc.errors()[0].get("loc", ())
+                    recorder.update(index, validation_path=".".join(str(part) for part in parts))
             raise JevInvalidResponse() from exc
+        finally:
+            if recorder:
+                recorder.update(index, latency_ms=elapsed_ms(started))
 

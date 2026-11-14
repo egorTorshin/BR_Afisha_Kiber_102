@@ -17,17 +17,22 @@ class UserService:
         self.db = db
 
     def telegram_user(self, telegram_id: str, name: str | None = None, *, create: bool = True):
-        telegram_id = str(telegram_id)
+        return self.external_user("telegram", telegram_id, name, create=create)
+
+    def external_user(self, provider: str, external_id: str, name: str | None = None, *, create: bool = True):
+        if provider not in {"telegram", "max"}:
+            raise ValueError("Unsupported identity provider")
+        external_id = str(external_id)
         with self.db.transaction():
             row = self.db.fetchone("""SELECT u.* FROM users u JOIN user_identities i ON i.user_id=u.id
-                                      WHERE i.provider='telegram' AND i.provider_id=?""", (telegram_id,))
+                                      WHERE i.provider=? AND i.provider_id=?""", (provider, external_id))
             if row or not create:
                 return row
             user_id = str(uuid4())
             self.db.execute('INSERT INTO users (id, display_name, created_at) VALUES (?, ?, ?)',
                             (user_id, name, now()))
             self.db.execute('INSERT INTO user_identities (provider, provider_id, user_id) VALUES (?, ?, ?)',
-                            ('telegram', telegram_id, user_id))
+                            (provider, external_id, user_id))
             return self.db.fetchone('SELECT * FROM users WHERE id=?', (user_id,))
 
     def create_session(self, user_id: str):

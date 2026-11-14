@@ -15,6 +15,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 @dataclass
 class Settings:
     telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", "").strip())
+    max_bot_token: str = field(default_factory=lambda: os.getenv("MAX_BOT_TOKEN", "").strip())
+    max_bot_enabled: bool = field(default_factory=lambda: os.getenv("MAX_BOT_ENABLED", "false").lower() in {"1", "true", "yes", "on"})
+    max_webhook_url: str = field(default_factory=lambda: os.getenv("MAX_WEBHOOK_URL", "").strip())
+    max_webhook_secret: str = field(default_factory=lambda: os.getenv("MAX_WEBHOOK_SECRET", "").strip())
     database_url: str = field(
         default_factory=lambda: os.getenv(
             "DATABASE_URL",
@@ -56,6 +60,10 @@ class Settings:
     jev_api_key: str = field(default_factory=lambda: os.getenv("JEV_API_KEY", "").strip())
     jev_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("JEV_TIMEOUT_SECONDS", "5")))
     jev_confidence_threshold: float = field(default_factory=lambda: float(os.getenv("JEV_CONFIDENCE_THRESHOLD", "0.7")))
+    redis_url: str = field(default_factory=lambda: os.getenv("REDIS_URL", "").strip())
+    jev_cache_ttl_seconds: int = field(default_factory=lambda: int(os.getenv("JEV_CACHE_TTL_SECONDS", "300")))
+    jev_prompt_version: str = field(default_factory=lambda: os.getenv("JEV_PROMPT_VERSION", "v1").strip())
+    catalog_cache_version: str = field(default_factory=lambda: os.getenv("CATALOG_CACHE_VERSION", "v1").strip())
     local_llm_base_url: str = field(default_factory=lambda: os.getenv("LOCAL_LLM_BASE_URL", "").strip())
     light_max_tokens: int = field(default_factory=lambda: int(os.getenv("LIGHT_LLM_MAX_TOKENS", "384")))
     heavy_max_tokens: int = field(default_factory=lambda: int(os.getenv("HEAVY_LLM_MAX_TOKENS", "512")))
@@ -85,6 +93,8 @@ class Settings:
                     raise ValueError(f"{name} must be an HTTP URL in native-ai mode")
         if not (0 <= self.jev_confidence_threshold <= 1 and 0 <= self.light_confidence_threshold <= 1):
             raise ValueError("Порог уверенности модели должен быть от 0 до 1")
+        if not 1 <= self.jev_cache_ttl_seconds <= 86400 or not self.jev_prompt_version or not self.catalog_cache_version:
+            raise ValueError("Некорректные параметры Jev cache")
         if any(value <= 0 for value in (self.jev_timeout_seconds, self.light_timeout_seconds,
                                         self.heavy_timeout_seconds, self.light_max_tokens,
                                         self.heavy_max_tokens, self.heavy_context_window,

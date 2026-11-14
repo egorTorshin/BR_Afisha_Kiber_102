@@ -184,12 +184,22 @@ def create_admin_router(database: Database, settings: Settings, auth: AdminAuth)
 
     @router.post("/api/v1/admin/import")
     async def admin_import(request: Request, filename: str = Query(...), session: dict = Depends(admin_only_write)):
-        if not filename.lower().endswith((".csv", ".json")) or len(filename) > 200 or "/" in filename or "\\" in filename:
-            raise HTTPException(422, "Поддерживаются CSV и JSON")
+        suffix = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if suffix not in {".csv", ".json", ".html", ".htm"} or len(filename) > 200 or "/" in filename or "\\" in filename:
+            raise HTTPException(422, "Поддерживаются CSV, JSON и HTML афиши ГКЗ")
         try:
-            return importer.import_from_content((await request.body()).decode("utf-8-sig"), filename,
-                                                "." + filename.rsplit(".", 1)[-1].lower(),
-                                                actor=f"admin:{session['username']}", max_rows=settings.max_import_rows)
+            content = (await request.body()).decode("utf-8-sig")
+            actor = f"admin:{session['username']}"
+            if suffix in {".html", ".htm"}:
+                from src.services.gkz_parser import parse_gkz_html
+                records = parse_gkz_html(content)
+                if not records:
+                    raise ValueError("В HTML не найдены полные карточки мероприятий ГКЗ")
+                if len(records) > settings.max_import_rows:
+                    raise ValueError("Превышено число записей импорта")
+                return importer.import_records(records, source_file=filename, actor=actor, source_type="страница")
+            return importer.import_from_content(content, filename, suffix, actor=actor,
+                                                max_rows=settings.max_import_rows)
         except (UnicodeError, ValueError, TypeError, KeyError) as exc:
             raise HTTPException(422, "Не удалось прочитать импорт") from exc
 

@@ -4,18 +4,20 @@ import json
 import math
 import re
 import time
+from copy import deepcopy
 from datetime import date
 from typing import Literal, Protocol
 
 from pydantic import Field, ValidationError, model_validator
 
-from src.agent.schemas import ContractModel, ToolCall
+from src.agent.schemas import ConstraintSet, ContractModel, ToolCall
 from src.agent.routing import RoutingFeatureExtractor
 from src.agent.security import PolicyDecision, SecurityEvent, SecurityFlags, ToolExecutionContext
 from src.agent.state import DialogueState
+from src.agent.diagnostics import latest_index, update_current
 from src.agent.tools import ToolRegistry
 from src.config import Settings
-from src.services.normalizer import parse_free_text_query
+from src.services.normalizer import classify_geography, parse_free_text_query, resolve_category
 
 
 class ConstraintConflict(ContractModel):
@@ -34,15 +36,15 @@ class HeavyFinal(ContractModel):
     @model_validator(mode="after")
     def coherent(self):
         if len(self.basis_event_ids) != len(set(self.basis_event_ids)):
-            raise ValueError("duplicate basis ID")
+            raise ValueError("duplicate_basis_event_ids")
         if self.status == "final" and not self.basis_event_ids:
-            raise ValueError("final requires evidence IDs")
+            raise ValueError("final_missing_evidence")
         if self.status != "final" and self.basis_event_ids:
-            raise ValueError("only final may contain evidence IDs")
+            raise ValueError("non_final_has_evidence")
         if self.status == "constraint_conflict" and not self.constraint_relaxation:
-            raise ValueError("constraint conflict requires a relaxation")
+            raise ValueError("conflict_missing_relaxation")
         if self.status != "constraint_conflict" and self.constraint_relaxation:
-            raise ValueError("unexpected constraint relaxation")
+            raise ValueError("non_conflict_has_relaxation")
         return self
 
     @property
@@ -89,7 +91,7 @@ class HeavyStep(ContractModel):
     @model_validator(mode="after")
     def one_action(self):
         if (len(self.calls) == 1) == (self.final is not None):
-            raise ValueError("step requires exactly one tool_call or one terminal action")
+            raise ValueError("step_action_count_invalid")
         return self
 
 
@@ -99,6 +101,9 @@ class HeavyTransport(Protocol):
 
 
 _SYSTEM = """Plan cultural events in Bashkortostan using only registered tools and observed event_id values.
+Only set a city when the user explicitly named a city or the dialogue state already has one.
+The region Bashkortostan/Башкортостан is not a city; never replace it with Ufa or another settlement.
+If the user names a place that is not a known city, ask for clarification instead of guessing.
 Each step is exactly one action: one tool_call, clarification, final, no_data, or constraint_conflict.
 Before no_data or constraint_conflict, call a read-only tool. Final JSON has only status,
 basis_event_ids, short_explanation, and optional constraint_relaxation. The backend renders event facts.
@@ -109,6 +114,17 @@ _COMPACT_EVENT_FIELDS = (
     "title", "date_start", "date_end", "city", "venue", "price_min", "price_max",
     "age_limit", "category", "lat", "lon",
 )
+
+
+def normalize_heavy_final_payload(payload: object) -> tuple[object, bool]:
+    """Drop only an inapplicable relaxation; all other contract checks stay strict."""
+    if (isinstance(payload, dict)
+            and payload.get("status") in {"final", "clarification", "no_data"}
+            and payload.get("constraint_relaxation") not in (None, "")):
+        normalized = deepcopy(payload)
+        normalized["constraint_relaxation"] = None
+        return normalized, True
+    return payload, False
 
 
 def _compact_event(raw: object) -> dict | None:
@@ -271,6 +287,13 @@ class HeavyLLMProvider:
             "is_free_only": True if parsed_filters.is_free_only else None,
             "max_age_limit": parsed_filters.max_age_limit,
         }
+        temporal_refinement = bool(
+            state.has_previous_results and any((parsed_filters.date_from, parsed_filters.date_to,
+                                                parsed_filters.time_after, parsed_filters.time_before))
+        )
+        inherits_context = features.requires_dialogue_context or temporal_refinement
+        if re.search(r"\b(?:подешевле|дешевле)\b", message.casefold()) and not re.search(r"\d+\s*(?:руб|₽)", message.casefold()):
+            normalized_search["max_price"] = None
         explicit_conflict = bool(
             re.search(r"\bбесплатн\w*\b", message.casefold()) and
             re.search(r"\b(?:дороже|от)\s+\d+", message.casefold())
@@ -296,6 +319,11 @@ class HeavyLLMProvider:
             payload = {
                 "current_date": (today or self.settings.get_reference_date()).isoformat(),
                 "constraint_set": state.active_constraints.model_dump(mode="json", exclude_none=True),
+                "last_result_ids": state.last_result_ids,
+                "shown_event_ids": state.shown_event_ids[-20:],
+                "selected_event_id": state.selected_event_id,
+                "pending_clarification": state.pending_clarification,
+                "last_user_intent": state.last_user_intent,
                 "dialogue": dialogue,
                 "request": message,
                 "step": step_number,
@@ -366,6 +394,9 @@ class HeavyLLMProvider:
                         constraint_relaxation="Уберите минимальную цену или условие бесплатного входа",
                     )
                 if not set(step.final.basis_event_ids).issubset(observed_ids):
+                    update_current(latest_index(), error_origin="agent_grounding",
+                                   error_category="unverified_event_id",
+                                   reason_code="unverified_event_id")
                     context.security_events.append(SecurityEvent(
                         decision=PolicyDecision.REJECTED, reason_code="unverified_event_id"))
                     return done(fallback, "unverified_event_id")
@@ -395,11 +426,45 @@ class HeavyLLMProvider:
                                     r"\d+\s*(?:руб|₽)", message.casefold()))):
                             continue
                         arguments[key] = value
+                    if inherits_context and state.has_previous_results:
+                        # State is the source of truth for inherited dimensions. A model
+                        # may change a dimension only when the current utterance parses it.
+                        inherited = state.active_constraints.model_dump(mode="json", exclude_none=True)
+                        for key in ConstraintSet.model_fields:
+                            explicit = normalized_search.get(key)
+                            if explicit is not None:
+                                arguments[key] = explicit
+                            elif key in inherited:
+                                arguments[key] = inherited[key]
+                            else:
+                                arguments.pop(key, None)
+                if proposed.name == "search_events" and isinstance(arguments, dict):
+                    # Model-proposed dimensions are accepted only from the current
+                    # utterance parser or saved dialogue constraints.
+                    inherited = state.active_constraints if inherits_context and state.has_previous_results else None
+                    authorized_city = parsed_filters.city or (inherited.city if inherited else None)
+                    if arguments.get("city"):
+                        geo_kind, resolved_city = classify_geography(
+                            str(arguments["city"]), db=getattr(self.registry, "db", None))
+                        if geo_kind != "city" or not authorized_city:
+                            arguments.pop("city", None)
+                        else:
+                            arguments["city"] = resolved_city
+                    authorized_category = parsed_filters.category or (inherited.category if inherited else None)
+                    if arguments.get("category"):
+                        resolved_category = resolve_category(
+                            str(arguments["category"]), db=getattr(self.registry, "db", None))
+                        if not authorized_category or not resolved_category:
+                            arguments.pop("category", None)
+                        else:
+                            arguments["category"] = authorized_category
                 if (features.intent == "planner" and proposed.name == "search_events" and
                         not successful_read and isinstance(arguments, dict)):
                     arguments = {**arguments, "limit": max(20, working_limit * 2), "offset": 0}
                 calls.append(ToolCall(name=proposed.name, arguments=arguments if isinstance(arguments, dict) else {}))
                 if proposed.name not in schemas:
+                    update_current(latest_index(), tool_name_validation="failure",
+                                   tool_argument_validation="not_checked", error_category="unknown_tool")
                     context.security_events.append(SecurityEvent(
                         tool_name=proposed.name, decision=PolicyDecision.REJECTED,
                         reason_code="intent_tool_not_allowed"))
@@ -413,6 +478,11 @@ class HeavyLLMProvider:
                             approvals.pop(index)
                             break
                 result = self.registry.execute(proposed.name, arguments, context=context, confirmed=approved)
+                invalid_tool_input = bool(result.error and result.error.code in {
+                    "invalid_arguments", "policy_rejected", "intent_tool_not_allowed"})
+                update_current(latest_index(), tool_name_validation="success",
+                               tool_argument_validation="failure" if invalid_tool_input else "success",
+                               error_category="tool_argument_validation" if invalid_tool_input else None)
                 if proposed.name == "search_events" and isinstance(result.payload, dict):
                     last_search_explanation = result.payload.get("explanation")
                 result_ids.append(result.result_ids)
