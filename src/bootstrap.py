@@ -16,9 +16,13 @@ def prepare(db: Database, settings: Settings, *, seed_demo: bool = False) -> int
     applied = apply_migrations(db, settings.migrations_dir)
     seed_dictionaries(db, settings.data_dir / "dictionaries.json")
     if seed_demo:
-        seed_file = settings.data_dir / "seed_events.json"
-        if seed_file.exists():
-            ImportService(db).import_from_file(seed_file, actor="startup_seed")
+        importer = ImportService(db)
+        for filename in ("seed_events.json", "import_100_events.csv"):
+            source = settings.data_dir / filename
+            if source.exists():
+                report = importer.import_from_file(source, actor="startup_seed")
+                if report.rejected_count:
+                    raise RuntimeError(f"Startup catalog import rejected {report.rejected_count} rows from {filename}")
     provision_roles(db)
     return applied
 

@@ -91,6 +91,7 @@ export default async function EventDetail({ params, searchParams }: Props) {
         <div><dt>Стоимость</dt><dd>{price}</dd></div>
         <div><dt>Возрастное ограничение</dt><dd>{Number.isFinite(event.age_limit) ? `${event.age_limit}+` : "Не указано"}</dd></div>
       </dl>
+      {safeUrl(event.source_url) && <a className="detail-source text-link" href={safeUrl(event.source_url)} target="_blank" rel="noopener noreferrer">Открыть источник события <ArrowUpRight size={16} aria-hidden="true" /><span className="sr-only"> (откроется в новой вкладке)</span></a>}
       <section className="detail-copy" aria-labelledby="event-description-heading">
         <h2 id="event-description-heading">О событии</h2>
         <p itemProp="description">{event.description?.trim() || "Описание пока не добавлено."}</p>

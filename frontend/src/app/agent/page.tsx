@@ -4,11 +4,11 @@ export const dynamic = "force-dynamic";
 
 export default function AgentPage() {
   return (
-    <main className="container page agent-page">
-      <p className="eyebrow">ПОМОЩНИК АФИШИ</p>
-      <h1>Найдём впечатления вместе</h1>
-      <p className="page-intro">Агент работает с актуальными опубликованными событиями и честно уточняет запрос, если данных недостаточно.</p>
+    <div className="container page-content agent-page">
+      <p className="issue-label">Каталог / помощь в поиске</p>
+      <h1 className="page-title">Поиск с помощником</h1>
+      <p className="page-intro">Опишите, что ищете. Можно уточнить город, дату, возраст и бюджет.</p>
       <AgentChat />
-    </main>
+    </div>
   );
 }

@@ -19,9 +19,6 @@ export default async function Feedback({
         <p className="page-intro">
           Заметили неточность или хотите поделиться идеей? Мы на связи.
         </p>
-        <div className="feedback-decoration" aria-hidden="true">
-          ↗
-        </div>
       </div>
       <FeedbackForm
         eventId={

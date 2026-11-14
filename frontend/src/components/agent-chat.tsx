@@ -71,11 +71,9 @@ export function AgentChat({ compact = false }: { compact?: boolean }) {
     <div className={`agent-chat ${compact ? "agent-chat-compact" : ""}`}>
       <div className="agent-chat-intro">
         <div>
-          <p className="eyebrow">ПОИСК В ДИАЛОГЕ</p>
-          <h2>Спросите, куда пойти</h2>
-          <p>Опишите город, дату, настроение или бюджет — агент уточнит детали и покажет только события из афиши.</p>
+          <h2>Ваш запрос</h2>
+          <p>Помощник уточнит детали и покажет опубликованные события.</p>
         </div>
-        <span className="agent-chat-note">Данные из сервиса афиши</span>
       </div>
       <div className="agent-chat-messages" aria-live="polite">
         {messages.length === 0 && (

@@ -47,9 +47,9 @@ export default async function Events({
   const filters = parseEventQuery(params);
   return (
     <div className="container page-content">
-      <p className="eyebrow">ВАШ МАРШРУТ К ВПЕЧАТЛЕНИЯМ</p>
-      <h1 className="page-title">Афиша событий</h1>
-      <p className="page-intro">Ищите знакомое. Открывайте неожиданное.</p>
+      <p className="issue-label">Каталог / Башкортостан</p>
+      <h1 className="page-title">События</h1>
+      <p className="page-intro">Найдите событие по названию, городу, дате и интересу.</p>
       <Suspense key={JSON.stringify(params)} fallback={<LoadingState />}>
         <CatalogFilters filters={filters} />
       </Suspense>

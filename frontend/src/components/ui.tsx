@@ -1,8 +1,6 @@
 import Link from "next/link";
 import {
   ArrowRight,
-  CalendarDays,
-  MapPin,
   Search,
   AlertCircle,
   LoaderCircle,
@@ -20,11 +18,11 @@ export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
         id="event-search"
         type="search"
         name="query_text"
-        placeholder="Что вам хочется увидеть?"
+        placeholder="Название, площадка или тема"
         defaultValue={defaultValue}
       />
       <button className="button" type="submit">
-        Найти <ArrowRight size={17} aria-hidden="true" />
+        Найти
       </button>
     </div>
   );
@@ -50,30 +48,16 @@ export function EventStatusBadge({
   );
 }
 export function EventCard({ event, returnHref }: { event: CultureEvent; returnHref?: string }) {
+  const date = new Date(/[zZ]|[+-]\d{2}:\d{2}$/.test(event.date_start) ? event.date_start : `${event.date_start}+05:00`);
+  const validDate = !Number.isNaN(date.getTime());
+  const detailHref = `/events/${encodeURIComponent(event.id)}${returnHref ? `?returnTo=${encodeURIComponent(returnHref)}` : ""}`;
   return (
     <article className="event-card">
-      <div className="event-art" aria-hidden="true">
-        <span>✳</span>
-        <span className="art-category">{event.category}</span>
-      </div>
+      <div className="event-date" aria-label={validDate ? formatDate(event.date_start) : "Дата уточняется"}><strong>{validDate ? new Intl.DateTimeFormat("ru-RU", { day: "2-digit", timeZone: "Asia/Yekaterinburg" }).format(date) : "—"}</strong><span>{validDate ? new Intl.DateTimeFormat("ru-RU", { month: "short", timeZone: "Asia/Yekaterinburg" }).format(date) : "дата"}</span><small>{validDate ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Yekaterinburg" }).format(date) : ""}</small></div>
       <div className="event-card-body">
-        <div className="event-meta">
-          <span>{event.category}</span>
-          <span>{event.age_limit}+</span>
-        </div>
-        <h3>
-          <Link href={`/events/${encodeURIComponent(event.id)}${returnHref ? `?returnTo=${encodeURIComponent(returnHref)}` : ""}`}>
-            {event.title}
-          </Link>
-        </h3>
-        <p>
-          <CalendarDays size={16} aria-hidden="true" />
-          {formatDate(event.date_start)}
-        </p>
-        <p>
-          <MapPin size={16} aria-hidden="true" />
-          {event.city} · {event.venue}
-        </p>
+        <div className="event-meta"><span>{event.category}</span><span>{event.age_limit}+</span></div>
+        <h3><Link href={detailHref}>{event.title}</Link></h3>
+        <p className="event-place">{event.city} · {event.venue}</p>
         <div className="event-card-bottom">
           <strong>
             {event.is_free
@@ -82,11 +66,9 @@ export function EventCard({ event, returnHref }: { event: CultureEvent; returnHr
                 ? `от ${event.price_min.toLocaleString("ru-RU")} ₽`
                 : "Цена уточняется"}
           </strong>
-          <EventStatusBadge
-            status={event.status}
-            disputed={event.is_disputed}
-          />
+          <EventStatusBadge status={event.status} disputed={event.is_disputed} />
         </div>
+        <Link className="event-open" href={detailHref}>Подробнее о событии <ArrowRight size={16} aria-hidden="true" /></Link>
       </div>
     </article>
   );
@@ -110,7 +92,7 @@ export function LoadingState() {
   return (
     <div className="state" role="status">
       <LoaderCircle className="animate-spin" size={28} aria-hidden="true" />
-      <h2>Собираем впечатления</h2>
+      <h2>Загружаем афишу</h2>
       <p>Загружаем события афиши…</p>
     </div>
   );
@@ -125,7 +107,7 @@ export function ErrorState({
   return (
     <div className="state error-state" role="alert">
       <AlertCircle size={30} aria-hidden="true" />
-      <h2>Афиша немного задерживается</h2>
+      <h2>Не удалось загрузить данные</h2>
       <p>{message}</p>
       {retry ? (
         <button className="button" onClick={retry}>
