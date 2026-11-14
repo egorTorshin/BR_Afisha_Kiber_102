@@ -17,6 +17,7 @@ from src.models.schemas import EventRecord, SearchFilters
 from src.services.feedback_service import FeedbackService
 from src.services.normalizer import normalize_text
 from src.services.search_service import SearchService
+from src.services.recommendation_service import RecommendationService
 from src.services.subscription_service import SubscriptionService
 
 log = logging.getLogger(__name__)
@@ -300,18 +301,10 @@ def create_tool_registry(
 
     def find_similar(args: FindSimilarInput) -> FindSimilarOutput:
         source = search.get_event_by_id(args.event_id)
-        if source is None:
+        if source is None or source.status != "published":
             raise LookupError("Event not found")
-        # SearchService owns publication and dedup rules. Rank a bounded candidate set by shared tags/venue.
-        candidates, _, _ = search.search(SearchFilters(city=source.city, category=source.category, limit=100))
-        tags = {normalize_text(t) for t in source.tags}
-        matches = [e for e in candidates if e.id != source.id]
-        matches.sort(key=lambda e: (
-            -len(tags & {normalize_text(t) for t in e.tags}),
-            normalize_text(e.venue) != normalize_text(source.venue),
-            e.date_start, e.id,
-        ))
-        return FindSimilarOutput(events=[_summary(e) for e in matches[:args.limit]])
+        recommendations = RecommendationService(search.db).find_similar_hybrid(source.id, limit=args.limit)
+        return FindSimilarOutput(events=[_summary(item.event) for item in recommendations])
 
     def get_venue_schedule(args: GetVenueScheduleInput) -> GetVenueScheduleOutput:
         # The service's venue filter is substring based; select the exact venue after retrieval.

@@ -98,6 +98,51 @@ class PublicEvent(BaseModel):
     sources: list[PublicEventSource]
 
 
+class RecommendationItem(BaseModel):
+    event: PublicEvent
+    score: float = Field(ge=0, le=1)
+    match_reason: str
+
+
+class RecommendationsResponse(BaseModel):
+    items: list[RecommendationItem]
+
+
+class WeekendPlanInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    city: Optional[str] = Field(default=None, max_length=120)
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+    max_budget_total: Optional[int] = Field(default=None, ge=0)
+    party_size: int = Field(default=1, ge=1, le=20)
+    max_age_limit: Optional[int] = Field(default=None, ge=0, le=18)
+    max_travel_min: int = Field(default=25, ge=0, le=600)
+    target_count: int = Field(default=3, ge=2, le=4)
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from must not be after date_to")
+        return self
+
+
+class ItineraryStopItem(BaseModel):
+    event: PublicEvent
+    start_time: datetime
+    end_time: datetime
+    travel_from_previous_min: int
+    unit_price: int
+    party_price: int
+
+
+class WeekendPlanResponse(BaseModel):
+    stops: list[ItineraryStopItem]
+    total_price: int
+    total_travel_min: int
+    target_count: int
+    conflict_explanation: Optional[str] = None
+
+
 class AdminEvent(PublicEvent):
     normalized_title: str
     source_hash: str

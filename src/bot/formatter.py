@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from src.models.schemas import EventRecord, ImportReport, SearchFilters
 from src.agent.schemas import AgentEventCard
+from src.services.recommendation_service import RecommendedEvent
 
 MONTHS_GENITIVE = {
     1: "января", 2: "февраля", 3: "марта", 4: "апреля",
@@ -282,6 +283,20 @@ def format_agent_response(message: str, cards: List[AgentEventCard]) -> str:
             f"   📅 {format_datetime_ru(card.date_start)}\n"
             f"   📍 г. {html.escape(card.city)}, {html.escape(card.venue)}"
         )
+    return "\n\n".join(lines)
+
+
+def format_recommendations_results(recs: List[RecommendedEvent], language: str = "ru") -> str:
+    if not recs:
+        return "✨ Пока нет подходящих опубликованных событий для подборки. Попробуйте другой город."
+    header = {"ru": "✨ <b>Для вас</b>", "en": "✨ <b>For you</b>",
+              "ba": "✨ <b>Һеҙҙең өсөн</b>"}.get(language, "✨ <b>Для вас</b>")
+    lines = [header]
+    for number, rec in enumerate(recs, start=1):
+        event = rec.event
+        lines.append(f"<b>{number}. {html.escape(event.title)}</b> ({event.age_limit}+)\n"
+                     f"   📅 {format_datetime(event.date_start, language)} • 📍 {html.escape(event.city)}\n"
+                     f"   💡 <i>{html.escape(rec.match_reason)}</i>")
     return "\n\n".join(lines)
 
 

@@ -21,6 +21,7 @@ from src.agent.repositories import (DialogueStateRepository, AgentTraceRepositor
 from src.config import Settings
 from src.services.normalizer import parse_free_text_query
 from src.services.search_service import SearchService
+from src.services.recommendation_service import RecommendationService
 from src.utils.metrics import AI_CALLS, AI_LATENCY, AI_TOKENS, AI_COST, AI_FALLBACKS
 from src.utils.logger import scrub_pii
 
@@ -54,6 +55,22 @@ def _confirmation_message(call: ToolCall) -> str:
     if call.name == "save_feedback":
         return "Подтвердите отправку отзыва модератору: ответьте «да» или «нет»."
     return "Подтвердите действие: ответьте «да» или «нет»."
+
+
+def _planner_numbers(message: str) -> tuple[int, int, int | None, int]:
+    """Extract total company budget, party size, stop count and travel cap."""
+    text = message.casefold().replace("ё", "е")
+    party = 2 if re.search(r"\b(?:на\s+двоих|вдвоем|двое|2\s+человек)\b", text) else (
+        3 if re.search(r"\b(?:на\s+троих|втроем|трое|3\s+человек)\b", text) else 1)
+    count_match = re.search(r"\b([2-4])\s*(?:событи\w*|мероприяти\w*)\b", text)
+    word_match = re.search(r"\b(два|две|три|четыре)\s+(?:событи\w*|мероприяти\w*)\b", text)
+    count = int(count_match.group(1)) if count_match else {"два": 2, "две": 2, "три": 3, "четыре": 4}.get(
+        word_match.group(1), 3) if word_match else 3
+    budget_match = re.search(r"\b(?:до\s+|бюджет\s*)?(\d{2,7})\s*(?:руб\w*\b|₽)", text)
+    budget = int(budget_match.group(1)) if budget_match else None
+    travel_match = re.search(r"\b(?:переезд\w*\s+до|до|не\s+более)\s+(\d{1,3})\s*мин\w*\s*(?:переезд\w*)?\b", text)
+    travel = int(travel_match.group(1)) if travel_match else 25
+    return party, count, budget, travel
 
 
 class AgentOrchestrator:
@@ -100,6 +117,7 @@ class AgentOrchestrator:
         search_call: ToolCall | None = None
         last_search_explanation: str | None = None
         heavy_result_kind: str | None = None
+        planner_handled = False
         normalized = request.message.strip().casefold().replace("ё", "е")
 
         def execute(call: ToolCall, *, confirmed: bool = False):
@@ -135,6 +153,53 @@ class AgentOrchestrator:
             elif state.pending_confirmation and normalized in _NO:
                 state.pending_confirmation = None
                 stop, message = "confirmation_cancelled", "Действие отменено."
+            elif features.intent == "planner" and not any(context.security_flags.model_dump().values()):
+                planner_handled = True
+                selected.append("deterministic_planner")
+                parsed = parse_free_text_query(request.message,
+                    ref_date=self.settings.get_reference_date(), db=getattr(self.search, "db", None))
+                party_size, target_count, total_budget, max_travel = _planner_numbers(request.message)
+                plan = RecommendationService(self.search.db).build_weekend_plan(
+                    city=parsed.city, date_from=parsed.date_from, date_to=parsed.date_to,
+                    max_budget_total=total_budget, party_size=party_size,
+                    max_age_limit=parsed.max_age_limit, max_travel_min=max_travel,
+                    target_count=target_count, ref_date=self.settings.get_reference_date())
+                search_args: dict = {"limit": 100, "offset": 0}
+                if parsed.city:
+                    search_args["city"] = parsed.city
+                if parsed.date_from:
+                    search_args["date_from"] = parsed.date_from[:10]
+                if parsed.date_to:
+                    search_args["date_to"] = parsed.date_to[:10]
+                if parsed.max_age_limit is not None:
+                    search_args["max_age_limit"] = parsed.max_age_limit
+                search_call = ToolCall(name="search_events", arguments=search_args)
+                execute(search_call)
+                observed_now = {event_id for group in tool_ids for event_id in group}
+                for item in plan.stops:
+                    if item.event.id not in observed_now:
+                        execute(ToolCall(name="get_event", arguments={"event_id": item.event.id}))
+                        observed_now = {event_id for group in tool_ids for event_id in group}
+                confirmed_stops = [item for item in plan.stops if item.event.id in observed_now]
+                basis = [item.event.id for item in confirmed_stops]
+                if confirmed_stops:
+                    lines = [f"Маршрут для {party_size} чел.:"]
+                    for number, item in enumerate(confirmed_stops, start=1):
+                        if item.travel_from_previous_min:
+                            lines.append(f"Переезд: {item.travel_from_previous_min} мин")
+                        lines.append(f"{number}. {item.start_time:%d.%m %H:%M}–{item.end_time:%d.%m %H:%M} "
+                                     f"{item.event.title} — {item.event.city}, {item.event.venue} "
+                                     f"({item.party_price} ₽)")
+                    lines.append(f"Итого: {sum(item.party_price for item in confirmed_stops)} ₽ "
+                                 f"на компанию; переезды: {sum(item.travel_from_previous_min for item in confirmed_stops)} мин.")
+                else:
+                    lines = ["Маршрут по заданным условиям пока не найден."]
+                if plan.conflict_explanation:
+                    lines.append(plan.conflict_explanation)
+                if len(confirmed_stops) < len(plan.stops):
+                    lines.append("Часть событий маршрута не удалось подтвердить в каталоге.")
+                message = "\n".join(lines)
+                stop = "completed" if confirmed_stops else "no_data"
             else:
                 if state.pending_confirmation:
                     state.pending_confirmation = None
@@ -275,10 +340,10 @@ class AgentOrchestrator:
                 stop, message = "no_data", "Данные о найденных событиях недоступны."
             elif search_call and not cards and stop == "completed":
                 stop, message = "no_data", last_search_explanation or "По вашему запросу событий не найдено. Попробуйте расширить период или убрать фильтр города."
-            elif not cards and stop in {"fallback_search", "no_data"} and heavy_result_kind is None:
+            elif not cards and stop in {"fallback_search", "no_data"} and heavy_result_kind is None and not planner_handled:
                 message = last_search_explanation or "По вашему запросу событий не найдено. Попробуйте расширить период или убрать фильтр города."
             elif cards:
-                if heavy_result_kind != "recommendation":
+                if heavy_result_kind != "recommendation" and not planner_handled:
                     message = _search_explanation(constraints)
                 stop = "completed" if stop == "completed" else stop
                 state.last_result_ids = [card.id for card in cards]

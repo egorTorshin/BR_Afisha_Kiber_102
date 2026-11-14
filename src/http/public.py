@@ -1,26 +1,59 @@
 """Public catalog and feedback HTTP routes."""
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
+from src.config import Settings
 from src.db.connection import Database
 from src.http.schemas import (CategoryItem, CityItem, EventPage, EventQuery, FeedbackInput,
                               HealthResponse, PublicEvent, VenueItem, VersionedEventPage,
-                              VersionedEventQuery, SubscriptionInput)
+                              VersionedEventQuery, SubscriptionInput, RecommendationsResponse,
+                              WeekendPlanInput, WeekendPlanResponse)
 from src.models.schemas import FeedbackRecord, SearchFilters
 from src.services.feedback_service import FeedbackService
 from src.services.search_service import SearchService
 from src.services.subscription_service import SubscriptionService
+from src.services.recommendation_service import RecommendationService
+from src.services.user_service import UserService
 from src.http.errors import run_service
 from src.utils.metrics import DATABASE_UP, DATABASE_LATENCY
 import time
 
 
-def create_public_router(database: Database) -> APIRouter:
+def create_public_router(database: Database, settings: Settings | None = None) -> APIRouter:
     router = APIRouter()
     search = SearchService(database)
     feedback = FeedbackService(database)
     subscriptions = SubscriptionService(database)
+    recommendations = RecommendationService(database)
+    users = UserService(database)
+
+    @router.get("/api/v1/recommendations", response_model=RecommendationsResponse)
+    def get_recommendations(request: Request, user_id: Optional[str] = Query(default=None, max_length=128),
+                            city: Optional[str] = Query(default=None, max_length=120),
+                            limit: int = Query(default=5, ge=1, le=20)):
+        session = users.session(request.cookies.get("user_session", ""))
+        if user_id and not session:
+            raise HTTPException(status_code=401, detail="Для персональной подборки требуется вход")
+        if user_id and session and user_id != session["id"]:
+            raise HTTPException(status_code=403, detail="Чужая история просмотров недоступна")
+        principal = session["id"] if session else ""
+        items = run_service(recommendations.recommend_for_user, principal, city=city, limit=limit,
+                            ref_date=settings.get_reference_date() if settings else None)
+        return RecommendationsResponse(items=[{"event": item.event, "score": item.score,
+                                               "match_reason": item.match_reason} for item in items])
+
+    @router.post("/api/v1/weekend-plan", response_model=WeekendPlanResponse)
+    def weekend_plan(data: WeekendPlanInput):
+        return run_service(
+            recommendations.build_weekend_plan,
+            city=data.city, date_from=data.date_from.isoformat() if data.date_from else None,
+            date_to=data.date_to.isoformat() if data.date_to else None,
+            max_budget_total=data.max_budget_total, party_size=data.party_size,
+            max_age_limit=data.max_age_limit, max_travel_min=data.max_travel_min,
+            target_count=data.target_count,
+            ref_date=settings.get_reference_date() if settings else None,
+        )
 
     @router.get("/events", response_model=EventPage)
     def list_events(query: Annotated[EventQuery, Query()]):

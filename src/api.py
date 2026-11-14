@@ -171,5 +171,5 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
     app.include_router(create_admin_router(database, settings, auth))
     app.include_router(create_user_router(database, settings, auth))
     app.include_router(create_agent_router(database, settings, auth))
-    app.include_router(create_public_router(database))
+    app.include_router(create_public_router(database, settings))
     return app

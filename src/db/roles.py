@@ -9,7 +9,7 @@ ROLE_TABLES = {
     "afisha_api": {
         "SELECT": ("cities", "categories", "venues", "events", "event_sources", "raw_events",
                    "import_reports", "feedback", "audit_log", "admin_sessions", "request_limits",
-                   "subscriptions", "agent_dialogue_states", "agent_traces", "agent_sessions",
+                   "subscriptions", "bot_profiles", "agent_dialogue_states", "agent_traces", "agent_sessions",
                    "agent_action_receipts"),
         "INSERT": ("events", "event_sources", "raw_events", "import_reports", "feedback",
                    "audit_log", "admin_sessions", "request_limits", "subscriptions",

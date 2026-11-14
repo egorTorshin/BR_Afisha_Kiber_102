@@ -1,5 +1,6 @@
 import html
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from src.agent.schemas import ConstraintSet
@@ -9,6 +10,7 @@ from src.bot.formatter import (
     format_filter_summary_block,
     format_help_message,
     format_import_report,
+    format_recommendations_results,
     format_search_results,
     format_subscriptions_list,
     format_welcome_message,
@@ -41,6 +43,7 @@ from src.services.import_service import ImportService
 from src.services.agent_service import AgentService
 from src.services.normalizer import normalize_text, parse_free_text_query, parse_iso_datetime, resolve_date_preset, resolve_city, resolve_category
 from src.services.search_service import SearchService
+from src.services.recommendation_service import RecommendationService
 from src.services.subscription_service import SubscriptionService
 from src.services.profile_service import ProfileService
 from src.services.user_service import UserService
@@ -64,6 +67,7 @@ class BotRouter:
         self.db = db
         self.settings = settings
         self.search_service = SearchService(db)
+        self.recommendation_service = RecommendationService(db)
         self.import_service = ImportService(db, max_import_bytes=settings.max_import_bytes,
                                             max_import_rows=settings.max_import_rows)
         self.sub_service = SubscriptionService(db, retention_days=settings.subscription_retention_days)
@@ -227,6 +231,19 @@ class BotRouter:
             self._manually_edited_filters.add(uid)
         return self._execute_search_response(uid)
 
+    def _recommend_response(self, uid: str) -> BotResponse:
+        filters = self.get_user_filters(uid)
+        recs = self.recommendation_service.recommend_for_user(
+            uid, city=filters.city, limit=5, ref_date=self.settings.get_reference_date())
+        events = [item.event for item in recs]
+        keyboard_filters = SearchFilters(city=filters.city, limit=5)
+        is_sub = self.sub_service.is_subscribed(uid, filters.city, None)
+        return BotResponse(
+            text=format_recommendations_results(recs, language=self._language(uid)),
+            reply_markup=search_results_keyboard(events, len(events), keyboard_filters,
+                                                 is_subscribed=is_sub, language=self._language(uid)),
+        )
+
     def _handle_agent_query(self, uid: str, text: str) -> BotResponse:
         """Run a free-form query through the shared agent service.
 
@@ -250,7 +267,11 @@ class BotRouter:
             log_event(self.logger, logging.ERROR, "Agent persistence unavailable; using catalog search",
                       user_id=uid, error_type=type(exc).__name__)
             result = None
-        if self.settings.ai_mode == "no-ai" and (result is None or result.status in {"ok", "fallback", "no_data"}):
+        trace = (self.agent_service.get_trace(result.request_id)
+                 if result is not None and result.status in {"ok", "fallback", "no_data"} else None)
+        if self.settings.ai_mode == "no-ai" and (
+                result is None or (result.status in {"ok", "fallback", "no_data"}
+                                   and not (trace and trace.routing_features.intent == "planner"))):
             parsed_filters = parse_free_text_query(
                 text,
                 ref_date=self.settings.get_reference_date(),
@@ -263,10 +284,8 @@ class BotRouter:
             self._user_filters[uid] = parsed_filters
             return self._execute_search_response(uid)
         remembered = False
-        if result.status in {"ok", "fallback", "no_data"}:
-            trace = self.agent_service.get_trace(result.request_id)
-            if trace:
-                remembered = self._remember_agent_search_filters(uid, text, trace.tool_calls)
+        if trace:
+            remembered = self._remember_agent_search_filters(uid, text, trace.tool_calls)
         filters = self.get_user_filters(uid)
         filters_note = ("\n\n⚙️ <b>Фильтры:</b> " + html.escape(filters.describe_human())
                         if remembered and not filters.is_empty() else "")
@@ -312,6 +331,8 @@ class BotRouter:
 
             if self._is_command(clean_text, "/search"):
                 return self._execute_search_response(uid)
+            if self._is_command(clean_text, "/recommend"):
+                return self._recommend_response(uid)
             if self._is_command(clean_text, "/help"):
                 filters = self.get_user_filters(uid)
                 return BotResponse(text=format_help_message(), reply_markup=main_menu_keyboard(
@@ -335,6 +356,10 @@ class BotRouter:
             if self._awaiting_custom_date.get(uid):
                 self._awaiting_custom_date.pop(uid, None)
                 return self._handle_custom_date_input(uid, clean_text)
+
+            if re.fullmatch(r"(?:мои\s+)?рекомендации[.!?]?|(?:посоветуй|порекомендуй)\s+что(?:-|\s)?нибудь\s+для\s+меня[.!?]?",
+                            clean_text.casefold().replace("ё", "е")):
+                return self._recommend_response(uid)
 
             # 3. Свободный текст обрабатывается как поисковый запрос без возврата в меню (Раздел 6.2 ТЗ)
             return self._handle_agent_query(uid, clean_text)
@@ -583,6 +608,9 @@ class BotRouter:
                 filters.date_from, filters.date_to = resolve_date_preset("weekend", self.settings.get_reference_date())
                 filters.offset = 0
                 return self._search_after_filter_change(uid)
+
+            if callback_data == "preset:for_you":
+                return self._recommend_response(uid)
 
             if callback_data == "preset:kids":
                 filters.max_age_limit = 6

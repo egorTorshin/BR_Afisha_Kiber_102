@@ -130,9 +130,11 @@ class TestAfishaLevel1(unittest.TestCase):
         self.assertIn("Показать события (18)", r1.reply_markup["inline_keyboard"][0][0]["text"])
         self.assertIn("не является официальным сайтом", r1.text)
         menu = r1.reply_markup["inline_keyboard"]
-        self.assertEqual(len(menu), 2)
+        self.assertEqual(len(menu), 4)
         self.assertEqual([button["callback_data"] for button in menu[0]],
                          ["search:run", "menu:filters"])
+        self.assertEqual([button["callback_data"] for button in menu[1]],
+                         ["preset:for_you", "preset:weekend"])
         # Действие 2: сразу открыть выдачу.
         r2 = self.router.handle_callback("user_42", "search:run")
         self.assertIn("Найдено событий", r2.text)

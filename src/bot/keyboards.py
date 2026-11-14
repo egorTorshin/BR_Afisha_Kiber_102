@@ -69,6 +69,10 @@ def main_menu_keyboard(
         [{"text": f"🔎 Показать события ({matching_count})" if matching_count is not None else "🔎 Показать события",
           "callback_data": "search:run"},
          {"text": "⚙️ Фильтры", "callback_data": "menu:filters"}],
+        [{"text": "✨ Для вас", "callback_data": "preset:for_you"},
+         {"text": "🔥 Выходные", "callback_data": "preset:weekend"}],
+        [{"text": "🆓 Бесплатно", "callback_data": "price:free"},
+         {"text": "🧒 Детям", "callback_data": "preset:kids"}],
         [{"text": f"🔔 Подписки ({subs_count})", "callback_data": "menu:subs"},
          {"text": "🌐 Язык / 📍 Гео", "callback_data": "profile:open"}],
     ]}
