@@ -75,7 +75,8 @@ def final(ids=None, kind="recommendation", question=None):
         "constraint_relaxation": "Смягчить ограничение" if status == "constraint_conflict" else None}}
 
 
-def setup(*, route=ModelRoute.LIGHT, lights=None, steps=None, fail_router=False, records=None):
+def setup(*, route=ModelRoute.LIGHT, lights=None, steps=None, fail_router=False, records=None,
+          single_pass=False):
     items = records if records is not None else [event("e1"), event("e2", 100)]
     seen = []
     changed = []
@@ -93,16 +94,120 @@ def setup(*, route=ModelRoute.LIGHT, lights=None, steps=None, fail_router=False,
         ToolDefinition("subscribe", SubscribeInput, SubscribeOutput, subscribe, ToolMetadata(True, True)),
     ])
     backend = SimpleNamespace(get_event_by_id=lambda eid: next((x for x in items if x.id == eid), None))
-    settings = Settings(ai_mode="local-ai", heavy_model="heavy-test")
+    settings = Settings(ai_mode="local-ai", heavy_model="heavy-test", heavy_single_pass=single_pass)
     heavy = HeavyLLMProvider(settings, registry, transport=Transport(steps or []))
     agent = AgentOrchestrator(registry, backend, Router(route, fail_router), Light(lights), heavy,
                               settings=settings)
     return agent, seen, changed
 
 
+def test_single_pass_end_to_end_renders_only_catalog_events_and_traces_mode():
+    agent, seen, _ = setup(route=ModelRoute.HEAVY, steps=[call(args={"city": "Уфа"})],
+                           single_pass=True)
+    response, trace, state = run(agent, "Какие концерты есть в Уфе?")
+    assert response.result_ids == ["e1", "e2"]
+    assert [card.id for card in response.event_cards] == ["e1", "e2"]
+    assert trace.heavy_execution_mode == "single_pass"
+    assert trace.llm_call_count == 0 and trace.input_tokens >= 0  # scripted transport records no HTTP attempt
+    assert len(seen) == 1 and state.has_previous_results
+
+
 def run(agent, message, conversation="c"):
     response = agent.run(AgentRequest(message=message, conversation_id=conversation))
     return response, agent.traces[response.trace_id], agent.states[conversation]
+
+
+@pytest.mark.parametrize("message,expected", [
+    ("Покажи что-нибудь интересное", "Уточните"),
+    ("Купи мне билет на концерт", "покуп"),
+])
+def test_adaptive_ambiguous_and_purchase_requests_do_not_search(message, expected):
+    agent, seen, _ = setup(lights=[light(args={"category": "концерт"})])
+    agent.settings.adaptive_agent_enabled = True
+    response, trace, _ = run(agent, message)
+    assert trace.stop_reason in {"clarification", "cannot_satisfy"}
+    assert expected.casefold() in response.message.casefold()
+    assert trace.execution_path == "DEEP"
+    assert not trace.tool_calls and not seen
+
+
+def test_child_age_followup_searches_with_exact_age():
+    agent, seen, _ = setup()
+    agent.settings.adaptive_agent_enabled = True
+    run(agent, "Концерты в Уфе")
+    response, trace, state = run(agent, "Ему 8 лет")
+    assert trace.stop_reason == "completed"
+    assert trace.tool_calls[-1].name == "search_events"
+    assert seen[-1].max_age_limit == 8
+    assert state.active_constraints.city == "Уфа"
+
+
+def test_explicit_child_age_refinement_retains_exact_years():
+    agent, seen, _ = setup()
+    agent.settings.adaptive_agent_enabled = True
+    run(agent, "Концерты в Уфе")
+    _, trace, state = run(agent, "Для ребёнка 8 лет")
+    assert trace.tool_calls[-1].arguments["max_age_limit"] == 8
+    assert seen[-1].max_age_limit == 8
+    assert state.active_constraints.max_age_limit == 8
+
+
+def test_proximity_without_location_asks_for_reference_point():
+    agent, seen, _ = setup()
+    agent.settings.adaptive_agent_enabled = True
+    run(agent, "Концерты в Уфе")
+    response, trace, _ = run(agent, "Что ближе?")
+    assert trace.stop_reason == "clarification"
+    assert "местополож" in response.message.casefold()
+    assert not trace.tool_calls
+
+
+def test_adaptive_flag_off_keeps_legacy_search_path():
+    agent, seen, _ = setup(lights=[light(args={"category": "концерт"})])
+    agent.settings.adaptive_agent_enabled = False
+    response, trace, _ = run(agent, "Купи мне билет на концерт")
+    assert response.result_ids == ["e1", "e2"]
+    assert trace.execution_path == "LEGACY"
+    assert [call.name for call in trace.tool_calls] == ["search_events"]
+    assert len(seen) == 1
+
+
+def test_adaptive_fast_search_skips_routers_and_models():
+    from src.agent.adaptive_router import AdaptiveRoute
+    agent, seen, _ = setup()
+    agent.settings.adaptive_agent_enabled = True
+    agent.router.decide = lambda _: (_ for _ in ()).throw(AssertionError("Jev called"))
+    agent.light.parse = lambda *_: (_ for _ in ()).throw(AssertionError("Qwen called"))
+    response, trace, _ = run(agent, "Концерты в Уфе")
+    assert response.result_ids == ["e1", "e2"] and len(seen) == 1
+    assert trace.adaptive_route == AdaptiveRoute.FAST
+    assert trace.route_reason == "exact_catalog_search"
+    assert trace.router_decision is None and trace.llm_call_count == 0
+    assert trace.stop_reason == "completed"
+
+
+def test_adaptive_smart_and_deep_keep_existing_execution():
+    from src.agent.adaptive_router import AdaptiveRoute
+    from src.agent.smart import SmartProvider
+    smart, _, _ = setup()
+    smart.settings.adaptive_agent_enabled = True
+    class SmartTransport:
+        def parse(self, **kwargs):
+            return '{"intent":"search_events","filters":{"city":"Уфа"}}', 2, 1
+    smart.smart = SmartProvider(smart.settings, smart.registry, transport=SmartTransport())
+    smart.router.decide = lambda _: (_ for _ in ()).throw(AssertionError("Jev called"))
+    _, smart_trace, _ = run(smart, "Какие концерты есть в Уфе?")
+    assert smart_trace.adaptive_route == AdaptiveRoute.SMART
+    assert smart_trace.router_decision is None
+    assert smart_trace.llm_call_count == 1
+    assert smart_trace.execution_path == "SMART"
+
+    deep, _, _ = setup(route=ModelRoute.HEAVY, steps=[call(), final(["e1"])])
+    deep.settings.adaptive_agent_enabled = True
+    _, deep_trace, _ = run(deep, "Сравни концерты и выставки")
+    assert deep_trace.adaptive_route == AdaptiveRoute.DEEP
+    assert deep_trace.route_reason == "comparison"
+    assert deep_trace.selected_models == ["heavy-test"]
 
 
 def test_simple_jev_light_search_cards_and_trace():
@@ -114,7 +219,7 @@ def test_simple_jev_light_search_cards_and_trace():
     assert trace.router_decision.route == ModelRoute.LIGHT
     assert trace.selected_models == ["light-test"]
     assert trace.tool_calls[0].arguments["city"] == "Уфа"
-    assert trace.user_query == "Концерты в Уфе"
+    assert trace.user_query is None
     assert "search_events" in trace.plan_summary
     assert "город Уфа" in response.message
     assert state.active_constraints.city == "Уфа" and len(state.turns) == 2
@@ -221,6 +326,17 @@ def test_model_failures_use_deterministic_search_without_5xx(failure):
     response, trace, _ = run(agent, "Найди концерты")
     assert response.result_ids and seen
     assert trace.fallback_reason and trace.stop_reason == "fallback_search"
+
+
+def test_jev_failure_still_runs_heavy_for_comparison():
+    agent, _, _ = setup(route=ModelRoute.HEAVY, fail_router=True,
+                        steps=[call(), final(["e1"])])
+    agent.settings.adaptive_agent_enabled = True
+    response, trace, _ = run(agent, "Сравни концерты и выставки по цене")
+    assert response.result_ids == ["e1"]
+    assert trace.selected_models == ["heavy-test"]
+    assert trace.fallback_reason is None
+    assert trace.router_decision.router_error is not None
 
 
 def test_five_tool_limit_returns_response():

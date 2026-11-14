@@ -91,7 +91,7 @@ export const api = {
       { method: "POST", body: JSON.stringify(input) },
       120000,
     ),
-  submitEvent: (input: Record<string, string | number | boolean | null>) =>
+  submitEvent: (input: Record<string, string | string[] | number | boolean | null>) =>
     request<{ id: string; status: string }>("/api/v1/event-submissions", {
       method: "POST",
       body: JSON.stringify(input),

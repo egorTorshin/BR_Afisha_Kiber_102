@@ -4,6 +4,11 @@ export interface EventSource {
   source_type: string;
   verified_at: string;
 }
+export interface EventScheduleItem {
+  date_start: string;
+  date_end: string | null;
+  source_url: string;
+}
 export interface CultureEvent {
   id: string;
   title: string;
@@ -32,6 +37,7 @@ export interface CultureEvent {
   is_disputed: boolean;
   dispute_reason: string | null;
   sources: EventSource[];
+  schedule: EventScheduleItem[];
 }
 export interface EventPage {
   events: CultureEvent[];

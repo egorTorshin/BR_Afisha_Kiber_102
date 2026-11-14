@@ -3,7 +3,7 @@ from dataclasses import asdict
 from src.bot.max.adapter import max_keyboard, normalize_update
 from src.bot.max.client import MaxClient, max_ssl_context
 from src.bot.max.webhook import MaxWebhookRunner
-from src.bot.router import BotRouter
+from src.bot.router import BotResponse, BotRouter
 from src.config import Settings
 from src.services.import_service import ImportService
 from src.services.user_service import UserService
@@ -107,6 +107,78 @@ def test_normalize_max_message_and_callback():
         "body": {"attachments": [{"type": "location", "latitude": 54.7, "longitude": 55.9}]}
     }})
     assert location["kind"] == "location" and location["latitude"] == 54.7
+
+
+def test_normalize_max_audio_attachment():
+    message = normalize_update({"update_type": "message_created", "message": {
+        "sender": {"user_id": 7}, "recipient": {"chat_id": 8},
+        "body": {"attachments": [{"type": "audio", "payload": {"url": "https://cdn.max.ru/a.webm"}}]},
+    }})
+    assert message["kind"] == "audio" and message["user_id"] == 7
+    assert message["audio_url"] == "https://cdn.max.ru/a.webm"
+
+
+def test_max_media_hosts_follow_official_upload_hosts_and_remain_exact():
+    from src.bot.max.adapter import _audio_url_allowed
+    assert _audio_url_allowed("https://omu.okcdn.ru/media/a.m4a")
+    assert _audio_url_allowed("https://fu.oneme.ru/api/a.mp3")
+    assert not _audio_url_allowed("https://attacker.max.ru/a.webm")
+
+
+def test_max_audio_transcribes_and_routes_original_user(db, monkeypatch):
+    import asyncio
+    import httpx
+    import src.bot.max.adapter as adapter_module
+
+    router = BotRouter(db, Settings(), platform="max")
+    seen = {}
+    async def transcribe(audio, filename, mime, settings):
+        seen["stt"] = (audio, filename, mime, settings)
+        return "Ищу выставки"
+
+    monkeypatch.setattr(adapter_module, "transcribe_audio", transcribe)
+    monkeypatch.setattr(router, "handle_message", lambda uid, text: (seen.update(route=(uid, text)) or BotResponse("ответ")))
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=b"audio"))) as http:
+            return await adapter_module.MaxAdapter(router).dispatch_audio({"update_type": "message_created", "message": {
+                "sender": {"user_id": 71}, "recipient": {"chat_id": 81}, "body": {"attachments": [
+                    {"type": "audio", "payload": {"url": "https://cdn.max.ru/a.webm"}}
+                ]},
+            }}, http)
+    incoming, transcript, response = asyncio.run(run())
+    assert seen["route"] == ("71", "Ищу выставки")
+    assert seen["stt"][0] == b"audio"
+    assert incoming["chat_id"] == 81 and transcript == "Ищу выставки" and response.text == "ответ"
+
+
+def test_max_audio_rejects_invalid_url_empty_and_oversized_before_stt(db, monkeypatch):
+    import asyncio
+    import httpx
+    import src.bot.max.adapter as adapter_module
+    from src.bot.max.adapter import MaxAudioError
+
+    router = BotRouter(db, Settings(), platform="max")
+    adapter = adapter_module.MaxAdapter(router)
+    monkeypatch.setattr(adapter_module, "transcribe_audio", lambda *args: (_ for _ in ()).throw(AssertionError("STT must not run")))
+    base = {"update_type": "message_created", "message": {"sender": {"user_id": 1},
+            "recipient": {"chat_id": 2}, "body": {"attachments": [{"type": "audio", "payload": {}}]}}}
+
+    async def run(url, payload=b"", headers=None):
+        update = {**base, "message": {**base["message"], "body": {"attachments": [{"type": "audio", "payload": {"url": url}}]}}}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, headers=headers, content=payload))) as http:
+            return await adapter.dispatch_audio(update, http)
+    async def cases():
+        for url in ("http://cdn.max.ru/a", "https://127.0.0.1/a", "https://example.org/a", "https://attacker.max.ru/a"):
+            try: await run(url)
+            except MaxAudioError: pass
+            else: raise AssertionError("bad URL accepted")
+        try: await run("https://cdn.max.ru/a")
+        except MaxAudioError as exc: assert "пуста" in str(exc)
+        else: raise AssertionError("empty audio accepted")
+        try: await run("https://cdn.max.ru/a", b"x", {"content-length": str(20 * 1024 * 1024 + 1)})
+        except MaxAudioError as exc: assert "20 МБ" in str(exc)
+        else: raise AssertionError("oversized audio accepted")
+    asyncio.run(cases())
 
 
 def test_max_and_telegram_identities_are_distinct(db):

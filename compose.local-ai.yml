@@ -57,6 +57,8 @@ services:
       ai-internal: {}
     environment:
       AI_MODE: local-ai
+      ADAPTIVE_AGENT_ENABLED: ${ADAPTIVE_AGENT_ENABLED:-false}
+      STRUCTURED_DEEP_ENABLED: ${STRUCTURED_DEEP_ENABLED:-false}
       JEV_ENABLED: "true"
       JEV_ENDPOINT: http://router:8001/decide
       JEV_MODEL: qwen2.5-1.5b-router
@@ -81,6 +83,8 @@ services:
       ai-internal: {}
     environment:
       AI_MODE: local-ai
+      ADAPTIVE_AGENT_ENABLED: ${ADAPTIVE_AGENT_ENABLED:-false}
+      STRUCTURED_DEEP_ENABLED: ${STRUCTURED_DEEP_ENABLED:-false}
       JEV_ENABLED: "true"
       JEV_ENDPOINT: http://router:8001/decide
       JEV_MODEL: qwen2.5-1.5b-router

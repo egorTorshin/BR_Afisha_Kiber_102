@@ -7,6 +7,8 @@ from typing import Literal
 from src.agent.decision_router import DecisionRouter
 from src.agent.heavy_llm import HeavyLLMProvider
 from src.agent.light_llm import LightLLMProvider
+from src.agent.smart import SmartProvider
+from src.agent.structured_deep import StructuredDeepPlanner
 from src.agent.orchestrator import AgentOrchestrator
 from src.agent.repositories import (
     AgentSessionRepository,
@@ -50,7 +52,8 @@ class AgentService:
     """Owns the agent pipeline and persistence, leaving transport concerns to adapters."""
 
     def __init__(self, database: Database, settings: Settings, *,
-                 router_factory=None, light_factory=None, heavy_factory=None) -> None:
+                 router_factory=None, light_factory=None, heavy_factory=None, smart_factory=None,
+                 structured_factory=None) -> None:
         self.database = database
         self.settings = settings
         self.search = SearchService(database)
@@ -67,6 +70,8 @@ class AgentService:
         self.router_factory = router_factory or DecisionRouter
         self.light_factory = light_factory or LightLLMProvider
         self.heavy_factory = heavy_factory or HeavyLLMProvider
+        self.smart_factory = smart_factory or SmartProvider
+        self.structured_factory = structured_factory or StructuredDeepPlanner
 
     def cleanup_expired(self) -> None:
         if time.monotonic() - self._last_cleanup < 3600:
@@ -115,6 +120,8 @@ class AgentService:
             self.router_factory(self.settings),
             self.light_factory(self.settings, registry),
             self.heavy_factory(self.settings, registry),
+            smart=self.smart_factory(self.settings, registry),
+            structured=self.structured_factory(self.settings, registry),
             state_repository=self.dialogue_repo,
             trace_repository=self.trace_repo,
             settings=self.settings,

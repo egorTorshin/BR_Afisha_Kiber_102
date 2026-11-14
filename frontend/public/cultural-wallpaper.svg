@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="380" viewBox="0 0 440 380" fill="none">
+  <g stroke="#146B4A" stroke-opacity=".13" stroke-width="2.5" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M76 154v-66M76 88 43 88M76 88 51 64M76 88 65 52M76 88V47M76 88l12-36M76 88l26-24M76 88h33"/>
+    <path d="M213 302c25-28 42-36 67-31 24 4 31 27 54 31M208 307h132"/>
+    <path d="M368 166h42v38h-42zM374 157h30l6 9h-42l6-9Z"/>
+  </g>
+  <g fill="#146B4A" fill-opacity=".11">
+    <circle cx="76" cy="88" r="7"/><circle cx="42" cy="88" r="5"/><circle cx="51" cy="63" r="5"/><circle cx="65" cy="51" r="5"/><circle cx="76" cy="46" r="5"/><circle cx="88" cy="51" r="5"/><circle cx="103" cy="63" r="5"/><circle cx="110" cy="88" r="5"/>
+  </g>
+  <g stroke="#B83D35" stroke-opacity=".12" stroke-width="2.5">
+    <path d="m290 40 20 20-20 20-20-20 20-20Zm0 9 11 11-11 11-11-11 11-11Z"/>
+    <path d="M10 312h46l14-12 14 12 14-12 14 12h42"/>
+  </g>
+  <g stroke="#D5A547" stroke-opacity=".18" stroke-width="2.5">
+    <path d="M171 139v47m-16-44 16-18 16 18m-24 18h16"/>
+    <path d="m385 306 16 16-16 16-16-16 16-16Z"/>
+  </g>
+</svg>

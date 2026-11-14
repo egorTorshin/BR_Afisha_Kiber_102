@@ -10,7 +10,9 @@ FROM python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b5
 
 ENV VIRTUAL_ENV=/opt/venv PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app
-RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin appuser
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 10001 --create-home --shell /usr/sbin/nologin appuser
 COPY --from=dependencies /opt/venv /opt/venv
 WORKDIR /app
 COPY --chown=appuser:appuser src ./src

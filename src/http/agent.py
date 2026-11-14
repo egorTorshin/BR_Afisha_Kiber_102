@@ -15,7 +15,7 @@ from src.http.security import check_browser_origin
 from src.services.admin_auth import AdminAuth
 from src.services.agent_service import AgentService
 from src.services.user_service import UserService
-from src.services.speech_service import SpeechUnavailable, transcribe_audio
+from src.services.speech_service import MAX_AUDIO_BYTES, SpeechUnavailable, transcribe_audio
 
 
 class AgentChatInput(BaseModel):
@@ -74,11 +74,11 @@ def create_agent_router(database: Database, settings: Settings, auth: AdminAuth,
     async def speech_transcribe(request: Request):
         check_browser_origin(request, settings)
         audio = await request.body()
-        if len(audio) > settings.speech_max_bytes:
+        if len(audio) > min(MAX_AUDIO_BYTES, max(1, int(settings.speech_max_bytes))):
             raise HTTPException(413, "Аудиозапись превышает допустимый размер")
         filename = request.headers.get("x-audio-filename", "recording.webm")[:120]
         try:
-            return {"text": transcribe_audio(audio, filename, request.headers.get("content-type", "audio/webm"), settings)}
+            return {"text": await transcribe_audio(audio, filename, request.headers.get("content-type", "audio/webm"), settings)}
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
         except SpeechUnavailable as exc:

@@ -88,7 +88,8 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
                     check_browser_origin(request, settings)
                 if request.method in {"POST", "PATCH", "PUT", "DELETE"}:
                     body_limit = (settings.max_import_bytes if path == "/api/v1/admin/import" else
-                                  settings.speech_max_bytes if path in {"/api/v1/speech/transcribe", "/api/v1/admin/voice-draft"} else 64 * 1024)
+                                  min(20 * 1024 * 1024, max(1, int(settings.speech_max_bytes)))
+                                  if path in {"/api/v1/speech/transcribe", "/api/v1/admin/voice-draft"} else 64 * 1024)
                     declared = request.headers.get("content-length")
                     if declared and int(declared) > body_limit:
                         raise HTTPException(413, "Размер запроса превышает допустимый")

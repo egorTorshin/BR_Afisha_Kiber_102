@@ -74,6 +74,7 @@ class EventSubmissionInput(BaseModel):
     category: Literal["концерт", "спектакль", "выставка", "фестиваль", "кино", "экскурсия", "другое"]
     date_start: str = Field(min_length=16, max_length=40)
     date_end: Optional[str] = Field(default=None, max_length=40)
+    schedule: list[str] = Field(default_factory=list, max_length=50)
     city: str = Field(min_length=2, max_length=120)
     venue: str = Field(min_length=2, max_length=250)
     address: str = Field(min_length=2, max_length=500)
@@ -84,6 +85,7 @@ class EventSubmissionInput(BaseModel):
     price_max: Optional[int] = Field(default=None, ge=0)
     is_free: bool = False
     age_limit: Literal[0, 6, 12, 16, 18] = 0
+    language: Optional[str] = Field(default=None, max_length=100)
 
 
 class SubmissionReviewInput(BaseModel):
@@ -97,6 +99,12 @@ class PublicEventSource(BaseModel):
     source_url: str
     source_type: str
     verified_at: str
+
+
+class PublicEventSchedule(BaseModel):
+    date_start: str
+    date_end: Optional[str] = None
+    source_url: str
 
 
 class PublicEvent(BaseModel):
@@ -128,6 +136,7 @@ class PublicEvent(BaseModel):
     is_disputed: bool
     dispute_reason: Optional[str]
     sources: list[PublicEventSource]
+    schedule: list[PublicEventSchedule] = Field(default_factory=list)
 
 
 class RecommendationItem(BaseModel):

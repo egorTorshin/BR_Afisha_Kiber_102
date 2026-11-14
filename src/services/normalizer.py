@@ -356,15 +356,20 @@ def parse_free_text_query(text: str, ref_date: date, db: Optional[Database] = No
         filters.language = lang_map.get(m_lang.group(1))
 
     # 2. Возраст ('с ребёнком 8 лет', 'ребенку 7 лет', 'для детей', '6+')
-    m_child_age = re.search(r"(?:с\s+ребенком|ребенку|для\s+ребенка)\s*(\d{1,2})\s*(?:лет|года|год)?", low)
+    m_child_age = re.search(r"(?:с\s+ребенком|ребенку|для\s+ребенка|ребенок|ребенка|ребенком)\s*(\d{1,2})\s*(?:лет|года|год)?", low)
     if m_child_age:
         mark_span(m_child_age)
         child_years = int(m_child_age.group(1))
         allowed_brackets = [b for b in sorted(VALID_AGE_LIMITS) if b <= child_years]
         filters.max_age_limit = max(allowed_brackets) if allowed_brackets else 0
     else:
+        spelled_age = re.search(r"\b(пяти|шести|семи|восьми|девяти|десяти)летн\w*\s+ребенк\w*", low)
+        if spelled_age:
+            mark_span(spelled_age)
+            filters.max_age_limit = {"пяти": 5, "шести": 6, "семи": 7, "восьми": 8,
+                                     "девяти": 9, "десяти": 10}[spelled_age.group(1)]
         m_for_kids = re.search(r"\b(для\s+детей|детский|детские|с\s+детьми|с\s+ребенком)\b", low)
-        if m_for_kids:
+        if m_for_kids and filters.max_age_limit is None:
             mark_span(m_for_kids)
             filters.max_age_limit = 6
 
@@ -448,7 +453,7 @@ def parse_free_text_query(text: str, ref_date: date, db: Optional[Database] = No
             (r"\b(сегодня)\b", "today"),
             (r"\b(завтра)\b", "tomorrow"),
             (r"\b(в\s+пятницу|пятница)\b", "friday"),
-            (r"\b(в\s+субботу|суббота)\b", "saturday"),
+            (r"\b((?:в\s+|на\s+)?субботу|суббота)\b", "saturday"),
             (r"\b(в\s+воскресенье|воскресенье)\b", "sunday"),
         ]
         for pat, preset_code in date_patterns:
@@ -480,7 +485,8 @@ def parse_free_text_query(text: str, ref_date: date, db: Optional[Database] = No
         "в", "во", "на", "по", "из", "до", "для", "или", "и", "а", "но", "не", "без",
         "чтобы", "закончилось", "ехать", "больше", "минут", "часов", "часа", "сколько",
         "стоит", "билет", "ближайший", "ближайшие", "мероприятия", "мероприятие", "события",
-        "событие", "отменили", "найди", "покажи", "какие", "где"
+        "событие", "отменили", "найди", "покажи", "посоветуй", "порекомендуй",
+        "предложи", "подбери", "какие", "где"
     }
 
     words = [w for w in re.findall(r"[а-яa-z0-9]+", leftover) if w not in stopwords]

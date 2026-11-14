@@ -47,6 +47,9 @@ def main() -> int:
     p_gkz.add_argument("--actor", default="gkz_collector", help="Инициатор записи в журнал аудита")
     p_gkz.add_argument("--dry-run", action="store_true", help="Загрузить и проверить страницу без подключения к БД")
     p_gkz.add_argument("--database-url", help="Явный SQLite URL для изолированного импорта")
+    p_venue = sub.add_parser("collect-venue", help="Собрать события с официальной афиши площадки Уфы")
+    p_venue.add_argument("source", choices=["bashopera", "bashgf", "nur"])
+    p_venue.add_argument("--dry-run", action="store_true", help="Проверить страницу без записи в БД")
 
     # 1. import
     p_imp = sub.add_parser("import", help="Импорт событий из файла CSV или JSON")
@@ -137,6 +140,17 @@ def main() -> int:
                 print(f"Отклонение ({item['title']}): {item['reason']}")
         return 0 if result.ok else 1
 
+    if args.command == "collect-venue" and args.dry_run:
+        from src.services.venue_collector import BY_CODE, VenueCollector
+        collector = VenueCollector(BY_CODE[args.source])
+        try:
+            result = collector.run()
+        finally:
+            collector.close()
+        print(result.message)
+        print(result.stats)
+        return 0 if result.ok else 1
+
     if args.command == "collect-gkz" and args.database_url:
         try:
             settings, db, imp_service, search_service = init_sqlite_services(args.database_url)
@@ -158,6 +172,19 @@ def main() -> int:
             if args.database_url:
                 db.close()
         print(result.message)
+        if result.report:
+            print(format_import_report(result.report))
+        return 0 if result.ok else 1
+
+    if args.command == "collect-venue":
+        from src.services.venue_collector import BY_CODE, VenueCollector
+        collector = VenueCollector(BY_CODE[args.source])
+        try:
+            result = collector.run(imp_service)
+        finally:
+            collector.close()
+        print(result.message)
+        print(result.stats)
         if result.report:
             print(format_import_report(result.report))
         return 0 if result.ok else 1

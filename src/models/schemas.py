@@ -90,6 +90,7 @@ class EventRecord:
     updated_at: str
     raw_event_id: Optional[str] = None
     sources: List[EventSource] = field(default_factory=list)
+    schedule: List[Dict[str, Optional[str]]] = field(default_factory=list)
     distance_km: Optional[float] = None
 
     @classmethod

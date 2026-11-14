@@ -1,0 +1,18 @@
+services:
+  telegram-vpn:
+    image: ghcr.io/sagernet/sing-box:latest
+    environment:
+      ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER: "true"
+    command: ["run", "-c", "/etc/sing-box/config.json"]
+    restart: unless-stopped
+    volumes:
+      - ./vpn/telegram-gateway.json:/etc/sing-box/config.json:ro
+    networks:
+      - default
+
+  bot:
+    depends_on:
+      telegram-vpn:
+        condition: service_started
+    environment:
+      TELEGRAM_PROXY_URL: http://telegram-vpn:2080

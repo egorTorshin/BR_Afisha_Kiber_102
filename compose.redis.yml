@@ -1,0 +1,40 @@
+services:
+  redis:
+    profiles: [redis]
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 48m
+    pids_limit: 64
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=8m
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-16379}:6379"
+    networks: [ai-internal]
+
+  api:
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JEV_CACHE_TTL_SECONDS: ${JEV_CACHE_TTL_SECONDS:-300}
+      JEV_PROMPT_VERSION: ${JEV_PROMPT_VERSION:-v1}
+      CATALOG_CACHE_VERSION: ${CATALOG_CACHE_VERSION:-v1}
+    networks:
+      default: {}
+      ai-internal: {}
+
+  bot:
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JEV_CACHE_TTL_SECONDS: ${JEV_CACHE_TTL_SECONDS:-300}
+      JEV_PROMPT_VERSION: ${JEV_PROMPT_VERSION:-v1}
+      CATALOG_CACHE_VERSION: ${CATALOG_CACHE_VERSION:-v1}
+    networks:
+      default: {}
+      ai-internal: {}
+
+networks:
+  ai-internal:
+    internal: true

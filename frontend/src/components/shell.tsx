@@ -3,10 +3,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRef, useState } from "react";
 import { Menu, X } from "lucide-react";
+import { BrandLockup } from "./brand-logo";
+import { KuraiArt } from "./kurai-art";
+import { BashkirOrnament, GeometricLandmark, type Landmark } from "./cultural-art";
 const links = [
+  { href: "/profile", label: "Профиль" },
   { href: "/submit-event", label: "Добавить событие" },
-  { href: "/feedback", label: "Обратная связь" },
-  { href: "/profile", label: "Мой профиль" },
 ];
 export function Header() {
   const pathname = usePathname();
@@ -23,10 +25,7 @@ export function Header() {
       }}
     >
       <div className="container header-inner">
-        <Link href="/" className="brand">
-          <span className="brand-mark" aria-hidden="true">А</span>
-          <span>Афиша <span className="brand-sub">Башкортостана</span></span>
-        </Link>
+        <Link href="/" className="brand" aria-label="Афиша Башкортостан — главная"><BrandLockup /></Link>
         <nav className="desktop-nav" aria-label="Основная навигация">
           {links.map((link) => (
             <Link
@@ -71,12 +70,19 @@ export function Header() {
   );
 }
 export function Footer() {
+  const places: Landmark[] = ["kurai", "friendship", "lale", "opera", "toratau", "shikhans"];
   return (
     <footer className="site-footer">
+      <div className="container cultural-finale">
+        <div className="cultural-finale-heading"><span>Башкортостан в линиях</span><BashkirOrnament /></div>
+        <div className="cultural-skyline" role="img" aria-label="Геометрическая панорама: курай, Монумент Дружбы, мечеть Ляля-Тюльпан, театр оперы и балета, Конгресс-холл Торатау и шиханы">{places.map(kind => <div className={`cultural-skyline-place cultural-skyline-${kind}`} key={kind}><GeometricLandmark kind={kind} /></div>)}</div>
+      </div>
       <div className="container footer-inner">
-        <Link className="brand" href="/"><span className="brand-mark" aria-hidden="true">А</span><span>Афиша <span className="brand-sub">Башкортостана</span></span></Link>
-        <nav aria-label="Ссылки в подвале"><Link href="/submit-event">Добавить событие</Link><Link href="/feedback">Обратная связь</Link><Link href="/developers">Виджет</Link></nav>
+        <div className="footer-kurai" aria-hidden="true"><KuraiArt /></div>
+        <Link className="brand" href="/" aria-label="Афиша Башкортостан — главная"><BrandLockup /></Link>
+        <nav aria-label="Ссылки в подвале"><Link href="/submit-event">Добавить событие</Link><Link href="/developers">Виджет</Link></nav>
         <p>Независимый навигатор по опубликованным событиям республики.</p>
+        <Link className="footer-feedback" href="/feedback">Обратная связь ↗</Link>
       </div>
     </footer>
   );

@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { SiteChrome } from "@/components/site-chrome";
+import { SiteChrome, SiteMain } from "@/components/site-chrome";
 import "./globals.css";
+import "./afisha-theme.css";
 export const metadata: Metadata = {
   title: {
     default: "Культура Башкортостана — рядом с вами",
@@ -21,9 +22,7 @@ export default async function RootLayout({
           Перейти к содержимому
         </a>
         <SiteChrome position="header" />
-        <main id="main" tabIndex={-1}>
-          {children}
-        </main>
+        <SiteMain>{children}</SiteMain>
         <SiteChrome position="footer" />
       </body>
     </html>

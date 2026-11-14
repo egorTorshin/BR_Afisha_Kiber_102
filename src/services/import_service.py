@@ -27,6 +27,7 @@ from src.services.normalizer import (
     resolve_category,
     resolve_city,
 )
+from src.services.event_series import scheduled_record, series_key
 
 
 class ImportService:
@@ -254,7 +255,7 @@ class ImportService:
             raise ValueError("Некорректная долгота")
 
         language_raw = raw_item.get("language")
-        language = str(language_raw).strip().lower() if language_raw and str(language_raw).strip() else "русский"
+        language = str(language_raw).strip().lower() if language_raw and str(language_raw).strip() else None
 
         source_type = str(raw_item.get("source_type") or default_source_type).strip()
         if source_type not in VALID_SOURCE_TYPES:
@@ -689,7 +690,23 @@ class ImportService:
     def update_event_status(self, event_id: str, new_status: str, actor: str = "moderator") -> EventRecord:
         with self.db.transaction():
             self.db.lock_events()
-            return self._update_event_status(event_id, new_status, actor)
+            row = self.db.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
+            if not row:
+                raise LookupError(f"Событие с ID '{event_id}' не найдено")
+            key = series_key(row)
+            if key[0] == "single":
+                return self._update_event_status(event_id, new_status, actor)
+            candidates = self.db.fetchall(
+                """SELECT * FROM events WHERE merged_into IS NULL AND normalized_title = ?
+                   AND search_city = ? AND search_venue = ?""",
+                (row["normalized_title"], row["search_city"], row["search_venue"]),
+            )
+            ids = [candidate["id"] for candidate in candidates if series_key(candidate) == key]
+            for candidate_id in ids:
+                self._update_event_status(candidate_id, new_status, actor)
+            updated = self.db.fetchall(
+                "SELECT * FROM events WHERE id IN (" + ", ".join("?" for _ in ids) + ") ORDER BY date_start, id", tuple(ids))
+            return scheduled_record(updated)
 
     def archive_event(self, event_id: str, actor: str) -> EventRecord:
         """Soft-delete by hiding the event as a locked draft; retain sources and full audit history."""
@@ -700,18 +717,32 @@ class ImportService:
                 raise LookupError("Событие не найдено")
             if previous.get("merged_into"):
                 raise ValueError("Событие уже объединено с другой карточкой")
+            key = series_key(previous)
+            if key[0] == "single":
+                members = [previous]
+            else:
+                candidates = self.db.fetchall(
+                    """SELECT * FROM events WHERE merged_into IS NULL AND normalized_title = ?
+                       AND search_city = ? AND search_venue = ?""",
+                    (previous["normalized_title"], previous["search_city"], previous["search_venue"]),
+                )
+                members = [candidate for candidate in candidates if series_key(candidate) == key]
             now_iso = datetime.now(timezone.utc).isoformat()
-            self.db.execute("UPDATE events SET status = 'draft', status_locked = 1, updated_at = ? WHERE id = ?",
-                            (now_iso, event_id))
-            self.log_audit(actor, "archive_event", "event", event_id,
-                           {"archived": {"old": False, "new": True},
-                            "status": {"old": previous["status"], "new": "draft"}})
-            row = self.db.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
-            record = EventRecord.from_row(row)
+            for member in members:
+                self.db.execute("UPDATE events SET status = 'draft', status_locked = 1, updated_at = ? WHERE id = ?",
+                                (now_iso, member["id"]))
+                self.log_audit(actor, "archive_event", "event", member["id"],
+                               {"archived": {"old": False, "new": True},
+                                "status": {"old": member["status"], "new": "draft"}})
+            rows = self.db.fetchall(
+                "SELECT * FROM events WHERE id IN (" + ", ".join("?" for _ in members) + ") ORDER BY date_start, id",
+                tuple(member["id"] for member in members))
+            record = scheduled_record(rows)
             record.sources = self.list_sources(event_id)
             return record
 
-    def update_event_fields(self, event_id: str, changes: Dict[str, Any], actor: str) -> EventRecord:
+    def update_event_fields(self, event_id: str, changes: Dict[str, Any], actor: str,
+                            _propagate: bool = True) -> EventRecord:
         """Validate editable fields and persist them with the standard audit trail."""
         editable = set(self.REQUIRED_FIELDS) | {"date_end", "duration_min", "price_min", "price_max", "is_free",
                     "age_limit", "language", "org_link", "tags", "lat", "lon"}
@@ -723,6 +754,15 @@ class ImportService:
             previous = self.db.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
             if not previous:
                 raise LookupError("Событие не найдено")
+            peers: list[str] = []
+            if _propagate and series_key(previous)[0] == "series":
+                candidates = self.db.fetchall(
+                    """SELECT * FROM events WHERE merged_into IS NULL AND normalized_title = ?
+                       AND search_city = ? AND search_venue = ?""",
+                    (previous["normalized_title"], previous["search_city"], previous["search_venue"]),
+                )
+                peers = [item["id"] for item in candidates
+                         if item["id"] != event_id and series_key(item) == series_key(previous)]
             payload = dict(previous)
             payload["tags"] = json.loads(payload.get("tags") or "[]")
             payload.update({k: v for k, v in changes.items() if k in editable})
@@ -730,7 +770,7 @@ class ImportService:
             norm = self._validate_and_normalize(payload, default_source_type=previous["source_type"])
             fields = ("title", "normalized_title", "category", "tags", "date_start", "date_end", "duration_min",
                       "city", "venue", "address", "lat", "lon", "description", "price_min", "price_max",
-                      "is_free", "age_limit", "language", "org_link", "status")
+                      "is_free", "age_limit", "language", "org_link", "status", "dedup_key")
             values = {k: norm[k] for k in fields}
             values.update(self._search_fields(norm))
             values["tags"] = json.dumps(values["tags"], ensure_ascii=False)
@@ -741,6 +781,11 @@ class ImportService:
                 self.db.execute("UPDATE events SET " + ", ".join(f"{k} = ?" for k in values) + " WHERE id = ?",
                                 (*values.values(), event_id))
                 self.log_audit(actor, "update_event", "event", event_id, diff)
+            shared_changes = {key: value for key, value in changes.items()
+                              if key not in {"date_start", "date_end", "source_url"}}
+            for peer_id in peers:
+                if shared_changes:
+                    self.update_event_fields(peer_id, shared_changes, actor, _propagate=False)
             row = self.db.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
             record = EventRecord.from_row(row)
             record.sources = self.list_sources(event_id)

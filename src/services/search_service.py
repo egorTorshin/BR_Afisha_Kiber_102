@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.db.connection import Database
 from src.models.schemas import EventRecord, EventSource, SearchFilters
 from src.services.normalizer import normalize_text, resolve_category, resolve_city
+from src.services.event_series import attach_sources, group_rows, scheduled_record, series_key, series_partition_sql
 
 
 class SearchService:
@@ -26,6 +27,18 @@ class SearchService:
             "SELECT * FROM event_sources WHERE event_id = ? ORDER BY source_url", (result.id,)
         )]
         return result
+
+    def _series_rows(self, row: dict, *, status: str) -> list[dict]:
+        if series_key(row)[0] == "single":
+            return [row]
+        candidates = self.db.fetchall(
+            """SELECT * FROM events WHERE merged_into IS NULL AND status = ?
+               AND normalized_title = ? AND search_city = ? AND search_venue = ?
+               ORDER BY date_start, id""",
+            (status, row["normalized_title"], row["search_city"], row["search_venue"]),
+        )
+        key = series_key(row)
+        return [candidate for candidate in candidates if series_key(candidate) == key]
 
     @staticmethod
     def distance_km(latitude: float, longitude: float, event: EventRecord) -> Optional[float]:
@@ -50,7 +63,10 @@ class SearchService:
             row = self.db.fetchone("SELECT * FROM events WHERE id = ?", (row["merged_into"],))
         if row["status"] == "draft" and not include_drafts:
             return None
-        return self._record(row)
+        group = self._series_rows(row, status=row["status"])
+        result = scheduled_record(group, representative=row)
+        attach_sources(self.db, [result], [group])
+        return result
 
     @staticmethod
     def _like(value: str) -> str:
@@ -123,7 +139,11 @@ class SearchService:
 
     def count_matching(self, filters: SearchFilters) -> int:
         where_sql, params = self._query_sql(filters)
-        return int(self.db.fetchone(f"SELECT COUNT(*) AS n FROM events WHERE {where_sql}", params)["n"])
+        partition = series_partition_sql()
+        return int(self.db.fetchone(
+            f"""SELECT COUNT(*) AS n FROM (SELECT ROW_NUMBER() OVER
+            (PARTITION BY {partition} ORDER BY date_start, id) AS series_rank
+            FROM events WHERE {where_sql}) grouped WHERE series_rank = 1""", params)["n"])
 
     def search(self, filters: SearchFilters, *, sort: str = "date_asc") -> Tuple[List[EventRecord], int, Optional[str]]:
         """
@@ -131,7 +151,7 @@ class SearchService:
         Возвращает: (список событий на текущей странице, общее число подходящих событий, подсказка при пустом результате).
         """
         where_sql, params = self._query_sql(filters)
-        total = int(self.db.fetchone(f"SELECT COUNT(*) AS n FROM events WHERE {where_sql}", params)["n"])
+        total = self.count_matching(filters)
         order_by = {
             "date_asc": "date_start ASC, id ASC",
             "date_desc": "date_start DESC, id DESC",
@@ -139,19 +159,18 @@ class SearchService:
         }.get(sort)
         if order_by is None:
             raise ValueError("Недопустимая сортировка")
+        partition = series_partition_sql()
+        rank_order = "date_start DESC, id DESC" if sort == "date_desc" else "date_start ASC, id ASC"
         rows = self.db.fetchall(
-            f"SELECT * FROM events WHERE {where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?",
+            f"""SELECT * FROM (SELECT events.*, ROW_NUMBER() OVER
+            (PARTITION BY {partition} ORDER BY {rank_order}) AS series_rank
+            FROM events WHERE {where_sql}) grouped WHERE series_rank = 1
+            ORDER BY {order_by} LIMIT ? OFFSET ?""",
             (*params, filters.limit, filters.offset),
         )
-        page = [EventRecord.from_row(row) for row in rows]
-        if page:
-            by_id = {event.id: event for event in page}
-            placeholders = ", ".join("?" for _ in page)
-            sources = self.db.fetchall(
-                f"SELECT * FROM event_sources WHERE event_id IN ({placeholders}) ORDER BY source_url", tuple(by_id)
-            )
-            for source in sources:
-                by_id[source["event_id"]].sources.append(EventSource(**source))
+        full_groups = [self._series_rows(row, status="published") for row in rows]
+        page = [scheduled_record(full, representative=row) for full, row in zip(full_groups, rows)]
+        attach_sources(self.db, page, full_groups)
         explanation = None
         if total == 0:
             explanation = self.explain_empty_result(filters)
@@ -164,18 +183,22 @@ class SearchService:
             return self.search(filters)
         where_sql, params = self._query_sql(filters)
         rows = self.db.fetchall(f"SELECT * FROM events WHERE {where_sql}", params)
-        events = [EventRecord.from_row(row) for row in rows]
+        grouped_events = [(scheduled_record(group), group) for group in group_rows(rows)]
         favorites = set(favorite_categories or [])
 
-        for event in events:
+        for event, _ in grouped_events:
             event.distance_km = self.distance_km(latitude, longitude, event)
 
         def distance(event: EventRecord) -> float:
             return event.distance_km if event.distance_km is not None else float("inf")
 
-        events.sort(key=lambda e: (e.date_start, 0 if e.category in favorites else 1, distance(e), e.id))
-        total = len(events)
-        page = events[filters.offset:filters.offset + filters.limit]
+        grouped_events.sort(key=lambda item: (item[0].date_start, 0 if item[0].category in favorites else 1,
+                                              distance(item[0]), item[0].id))
+        total = len(grouped_events)
+        selected = grouped_events[filters.offset:filters.offset + filters.limit]
+        page = [event for event, _ in selected]
+        page_groups = [group for _, group in selected]
+        attach_sources(self.db, page, page_groups)
         return page, total, self.explain_empty_result(filters) if not page else None
 
     def recommend_alternatives(self, filters: SearchFilters, reference_date) -> tuple[str, list[EventRecord]]:

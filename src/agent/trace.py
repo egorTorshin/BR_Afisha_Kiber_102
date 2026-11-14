@@ -8,6 +8,7 @@ from pydantic import Field
 from src.agent.schemas import ContractModel, ModelRoute, RoutingFeatures, ToolCall
 from src.agent.security import PolicyDecision, SecurityEvent, SecurityFlags
 from src.agent.decision_router import RouterDecision
+from src.agent.adaptive_router import AdaptiveRoute
 
 if TYPE_CHECKING:
     from src.agent.light_llm import LightDecision
@@ -35,6 +36,9 @@ class AgentTrace(ContractModel):
     policy_decision: PolicyDecision | None = None
     reason_code: str | None = None
     router_decision: RouterDecision | None = None
+    adaptive_route: AdaptiveRoute | None = None
+    execution_path: str | None = None
+    route_reason: str | None = None
     light_confidence: float | None = Field(default=None, ge=0, le=1)
     light_proposed_tool: str | None = None
     light_escalation_reason: str | None = None
@@ -51,6 +55,7 @@ class AgentTrace(ContractModel):
     inference_diagnostics: list[dict] = Field(default_factory=list)
     stage_latency_ms: dict[str, int] = Field(default_factory=dict)
     llm_call_count: int = Field(default=0, ge=0)
+    heavy_execution_mode: str | None = None
 
     def with_light_decision(self, decision: "LightDecision") -> "AgentTrace":
         """Attach safe Light metadata without storing prompt or raw model output."""
@@ -84,4 +89,5 @@ class AgentTrace(ContractModel):
                       security_events=decision.security_events,
                       security_flags=decision.security_flags,
                       policy_decision=decision.policy_decision)
+        values["heavy_execution_mode"] = decision.execution_mode
         return AgentTrace.model_validate(values)

@@ -1,4 +1,6 @@
 import pytest
+import io
+import wave
 from fastapi.testclient import TestClient
 
 from src.api import create_app
@@ -27,6 +29,23 @@ def client(db, catalog):
     settings = Settings(cors_origins=['https://client.example'], public_cache_max_age=25)
     with TestClient(create_app(db, settings), raise_server_exceptions=False) as client:
         yield client
+
+
+def _wav(seconds):
+    audio = io.BytesIO()
+    with wave.open(audio, 'wb') as wav:
+        wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(8000)
+        wav.writeframes(b'\0\0' * (8000 * seconds))
+    return audio.getvalue()
+
+
+def test_web_speech_endpoint_rejects_21_seconds_and_reports_unavailable_stt(db):
+    settings = Settings(groq_api_key='')
+    with TestClient(create_app(db, settings), raise_server_exceptions=False) as client:
+        too_long = client.post('/api/v1/speech/transcribe', content=_wav(21), headers={'Content-Type': 'audio/wav'})
+        assert too_long.status_code == 422
+        unavailable = client.post('/api/v1/speech/transcribe', content=_wav(1), headers={'Content-Type': 'audio/wav'})
+        assert unavailable.status_code == 503
 
 
 def test_routes_and_visibility(client, catalog):

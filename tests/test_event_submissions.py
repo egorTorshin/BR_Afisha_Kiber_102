@@ -23,6 +23,21 @@ def test_submission_stays_private_until_review(db):
         service.review(saved["id"], "rejected", "admin:test")
 
 
+def test_submission_accepts_multiple_showtimes_on_same_day(db):
+    service = EventSubmissionService(db)
+    proposal = event(title="Два показа", source_url="https://example.com/two",
+                     date_start="2026-12-20T10:00:00",
+                     schedule=["2026-12-20T10:00:00", "2026-12-20T13:00:00"],
+                     language="башкирский")
+    saved = service.submit(proposal)
+    assert len(service.pending()[0]["schedule"]) == 2
+    service.review(saved["id"], "approved", "admin:test")
+    page, total, _ = SearchService(db).search(SearchFilters())
+    assert total == 1
+    assert len(page[0].schedule) == 2
+    assert page[0].language == "башкирский"
+
+
 def test_rejection_and_duplicate_guard(db):
     service = EventSubmissionService(db)
     proposal = event(title="Новое событие", source_url="https://example.com/new")

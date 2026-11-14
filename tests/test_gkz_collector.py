@@ -8,6 +8,7 @@ import pytest
 from src.db.connection import Database
 from src.db.migrations import apply_migrations
 from src.services.gkz_collector import GKZCollector, USER_AGENT
+from src.services.gkz_parser import parse_gkz_html
 from src.services.import_service import ImportService
 
 
@@ -67,6 +68,40 @@ def test_dry_run_validates_without_writing_to_database(importer):
     assert db.fetchone("SELECT COUNT(*) AS n FROM events")["n"] == 0
     assert db.fetchone("SELECT COUNT(*) AS n FROM import_reports")["n"] == 0
     assert db.fetchone("SELECT COUNT(*) AS n FROM raw_events")["n"] == 0
+
+
+def test_gkz_skips_same_event_at_another_venue(importer):
+    db, service = importer
+    record = dict(parse_gkz_html(HTML)[0])
+    record.update(venue="Другая площадка", address="Уфа, другая улица, 1",
+                  source_url="https://example.org/other-event")
+    assert service.import_records([record], source_file="other", default_status="draft").added_count == 1
+    client = client_for(lambda request: httpx.Response(200, text=HTML, request=request))
+    try:
+        result = GKZCollector(client=client).collect(service)
+    finally:
+        client.close()
+    assert result.ok and result.report
+    assert result.stats["ambiguous"] == 1
+    assert result.report.added_count == 56
+    assert db.fetchone("SELECT COUNT(*) AS n FROM events")["n"] == 57
+
+
+def test_gkz_links_exact_match_from_another_source(importer):
+    db, service = importer
+    record = dict(parse_gkz_html(HTML)[0])
+    record["source_url"] = "https://example.org/same-event"
+    assert service.import_records([record], source_file="other", default_status="draft").added_count == 1
+    client = client_for(lambda request: httpx.Response(200, text=HTML, request=request))
+    try:
+        result = GKZCollector(client=client).collect(service)
+    finally:
+        client.close()
+    assert result.ok and result.report
+    assert result.stats["duplicates"] == 1
+    assert result.report.added_count == 56
+    assert db.fetchone("SELECT COUNT(*) AS n FROM events")["n"] == 57
+    assert db.fetchone("SELECT COUNT(*) AS n FROM event_sources")["n"] == 58
 
 
 def test_full_import_cycle_on_isolated_sqlite_snapshot(tmp_path):

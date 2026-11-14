@@ -68,6 +68,8 @@ def test_all_read_tools_success(catalog):
 
     similar = registry.execute("find_similar", {"event_id": first.id})
     assert similar.error is None
+
+
     assert FindSimilarOutput.model_validate(similar.payload).events
     assert similar.result_ids[0] == second.id
     assert first.id not in similar.result_ids and draft.id not in similar.result_ids
@@ -83,6 +85,15 @@ def test_all_read_tools_success(catalog):
     assert GetVenueScheduleOutput.model_validate(schedule.payload).total == 2
     assert set(schedule.result_ids) == {first.id, second.id}
     assert elsewhere.id not in schedule.result_ids
+
+
+@pytest.mark.parametrize("tool", ["get_event", "find_similar"])
+@pytest.mark.parametrize("event_id", [None, "null", " NULL ", "", "  ", "none", "undefined", "n/a", "<event_id>"])
+def test_event_id_placeholders_are_rejected_by_registry(catalog, tool, event_id):
+    registry = catalog[0]
+    result = registry.execute(tool, {"event_id": event_id})
+    assert result.error is not None
+    assert result.error.code == "invalid_arguments"
 
 
 def test_state_changing_tools_use_trusted_identity(catalog, db):

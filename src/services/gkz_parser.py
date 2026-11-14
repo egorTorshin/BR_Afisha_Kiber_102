@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from html import unescape
 from datetime import date as date_type
 from html.parser import HTMLParser
 from typing import Any, Optional
@@ -76,13 +77,13 @@ def _first(node: _Node, predicate) -> Optional[_Node]:
 
 def _category(title: str) -> str:
     value = title.casefold()
-    if any(word in value for word in ("спектакль", "балет", "опера", "мюзикл")):
+    if any(word in value for word in ("спектакль", "балет", "опера", "мюзикл", "представление", "сказка")):
         return "спектакль"
     if "выставк" in value:
         return "выставка"
     if "фестивал" in value:
         return "фестиваль"
-    if any(word in value for word in ("концерт", "музыкальн", "рок", "джаз")):
+    if any(word in value for word in ("концерт", "музыкальн", "рок", "джаз", "трибьют", "оркестр", "ансамбл", "вокал")):
         return "концерт"
     return "другое"
 
@@ -124,9 +125,15 @@ def parse_gkz_html(content: str) -> list[dict[str, Any]]:
         description_node = _first(article, lambda n: _has_class(n, "mec-event-description"))
         description = re.sub(r"\s+", " ", description_node.text() if description_node else "").strip()
         description = re.sub(r"\s*\.\.\.\s*$", "", description)
+        event_metadata = metadata.get(id(article), {})
+        structured_description = event_metadata.get("description")
+        if isinstance(structured_description, str):
+            candidate = re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", unescape(structured_description))).strip()
+            if len(candidate) > len(description) and "�" not in candidate:
+                description = candidate[:10000]
 
         # JSON-LD supplies the year omitted by the visible date label.
-        date = metadata.get(id(article), {}).get("startDate", "")
+        date = event_metadata.get("startDate", "")
         time_node = _first(article, lambda n: _has_class(n, "mec-start-time"))
         time = time_node.text().strip() if time_node else ""
         if not re.fullmatch(r"\d{1,2}:\d{2}", time):
@@ -142,6 +149,12 @@ def parse_gkz_html(content: str) -> list[dict[str, Any]]:
             continue
         if not description or len(description) < 20:
             continue
+        offer = event_metadata.get("offers")
+        raw_price = offer.get("price") if isinstance(offer, dict) else None
+        try:
+            price = int(float(raw_price)) if raw_price not in (None, "") else None
+        except (TypeError, ValueError):
+            price = None
         events.append({
             "title": title,
             "category": _category(title),
@@ -152,6 +165,8 @@ def parse_gkz_html(content: str) -> list[dict[str, Any]]:
             "venue": VENUE,
             "address": ADDRESS,
             "description": description or title,
+            "price_min": price if price and price > 0 else None,
+            "is_free": price == 0,
             "source_url": source_url,
             "source_type": "страница",
             "status": "draft",
@@ -160,3 +175,16 @@ def parse_gkz_html(content: str) -> list[dict[str, Any]]:
             "dispute_reason": "Категория и время требуют проверки модератором",
         })
     return events
+
+
+def parse_gkz_detail_html(content: str) -> dict[str, Any]:
+    """Read the full event body; the listing description is often cut mid-sentence."""
+    parser = _TreeParser()
+    parser.feed(content)
+    for class_name in ("mec-single-event-description", "mec-event-content", "entry-content"):
+        body = _first(parser.root, lambda node: _has_class(node, class_name))
+        if body:
+            description = re.sub(r"\s+", " ", body.text()).strip()
+            if len(description) >= 20:
+                return {"description": description[:10000]}
+    return {}

@@ -2,8 +2,11 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { LoadingState } from "@/components/ui";
 import { KuraiArt } from "@/components/kurai-art";
+import { SalavatArt } from "@/components/salavat-art";
+import { BashkirOrnament } from "@/components/cultural-art";
 import { CatalogForm, ResultsToolbar } from "@/components/catalog-form";
 import { EventResults } from "@/components/event-results";
+import { FeaturedEvents } from "@/components/featured-events";
 import { api } from "@/lib/api";
 import { eventsHref, parseEventQuery, type SearchParams } from "@/lib/event-query";
 import type { EventFilters } from "@/lib/types";
@@ -33,12 +36,19 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   const filters = Object.keys(params).length ? parseEventQuery(params) : { ...parseEventQuery(params), date_from: today };
   return <>
     <section className="home-search"><div className="container home-search-inner">
-      <div className="home-search-heading"><h1>Афиша республики Башкортостан</h1><p>Опишите, куда хотите пойти, или выберите город, дату и интерес ниже.</p><Link className="home-catalog-link" href="#catalog">К поиску событий</Link></div>
-      <KuraiArt />
-      <nav className="date-links" aria-label="Быстрый выбор даты"><span>Когда</span><Link href={`${eventsHref({ date_from: today, date_to: today })}#catalog`}>Сегодня</Link><Link href={`${eventsHref({ date_from: today, sort: "date_asc" })}#catalog`}>Ближайшие</Link><Link href="#catalog">Выбрать даты</Link></nav>
+      <div className="home-search-heading">
+        <h1>Найдите повод <em>выйти в город.</em></h1>
+        <p>Спектакли, концерты и выставки республики — в одной афише. Выберите то, что интересно вам, и составьте свой маршрут.</p>
+      </div>
+      <div className="hero-poster">
+        <SalavatArt className="hero-salavat" />
+        <div className="hero-kurai" aria-hidden="true"><KuraiArt /></div>
+      </div>
+      <nav className="date-links" aria-label="Быстрый выбор даты"><Link href={`${eventsHref({ date_from: today, date_to: today })}#catalog`}>Сегодня <span aria-hidden="true">↗</span></Link><Link href={`${eventsHref({ date_from: today, sort: "date_asc" })}#catalog`}>Ближайшие <span aria-hidden="true">↗</span></Link><Link href="#catalog">Все даты <span aria-hidden="true">↗</span></Link></nav>
     </div></section>
+    <Suspense fallback={null}><FeaturedEvents from={today} /></Suspense>
     <section id="catalog" className="catalog-page" aria-label="Афиша событий"><div className="container catalog-content">
-      <div className="catalog-heading"><span className="issue-label">Поиск по афише</span><h2>События</h2></div>
+      <div className="catalog-heading"><div><span className="issue-label">Выберите своё событие</span><h2>Афиша <em>событий</em></h2><BashkirOrnament className="catalog-ornament" /></div><p>Ищите по названию или уточните город, дату и формат — подборка обновится под ваш запрос.</p></div>
       <Suspense key={JSON.stringify(params)} fallback={<LoadingState />}><CatalogFilters filters={filters} /></Suspense>
       <ResultsToolbar filters={filters} />
       <section id="results" aria-label="Результаты поиска" tabIndex={-1}>

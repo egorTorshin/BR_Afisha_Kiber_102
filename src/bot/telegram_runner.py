@@ -1,10 +1,14 @@
 import asyncio
+import html
 import logging
 from typing import Any, Dict, Optional
 import httpx
 import time
+import os
 from src.utils.metrics import BOT_REQUESTS, BOT_LATENCY
 from src.bot.router import BotResponse, BotRouter
+from src.config import Settings
+from src.services.speech_service import MAX_AUDIO_BYTES, MAX_AUDIO_DURATION_SECONDS, SpeechUnavailable, transcribe_audio
 from src.utils.logger import get_logger, log_event, request_id_ctx, new_request_id
 
 
@@ -18,9 +22,10 @@ class TelegramPollingRunner:
     - Изоляция ошибок отдельных апдейтов от основного цикла getUpdates.
     """
 
-    def __init__(self, token: str, router: BotRouter, log_level: str = "INFO") -> None:
+    def __init__(self, token: str, router: BotRouter, log_level: str = "INFO", settings: Optional[Settings] = None) -> None:
         self.token = token
         self.router = router
+        self.settings = settings or Settings()
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.file_url = f"https://api.telegram.org/file/bot{token}"
         self.logger = get_logger("afisha_rb.poller", log_level)
@@ -29,9 +34,11 @@ class TelegramPollingRunner:
         self._last_bot_message: Dict[int, int] = {}
 
     def _create_http_client(self) -> httpx.AsyncClient:
+        proxy = os.getenv("TELEGRAM_PROXY_URL", "").strip()
         transport = httpx.AsyncHTTPTransport(
             local_address="0.0.0.0",
             retries=3,
+            proxy=proxy or None,
         )
         timeout = httpx.Timeout(
             connect=10.0,
@@ -244,10 +251,62 @@ class TelegramPollingRunner:
                     return
 
                 if "voice" in msg:
-                    bot_resp = BotResponse(text=("🎙 Голосовой запрос получен. Распознавание речи подключается через внешний "
-                                                 "speech-to-text сервис; пока отправьте тот же запрос текстом."))
+                    voice = msg["voice"]
+                    duration_limit = min(MAX_AUDIO_DURATION_SECONDS, max(1, int(self.settings.speech_max_duration_sec)))
+                    if float(voice.get("duration") or 0) > duration_limit:
+                        bot_resp = BotResponse(text=f"❌ Голосовое сообщение слишком длинное. Максимум — {duration_limit} секунд.")
+                        await self.send_new_screen(client, chat_id, bot_resp.text, delete_previous_bot_msg=True)
+                        await self._safe_delete_message(client, chat_id, incoming_message_id)
+                        return
+                    byte_limit = min(MAX_AUDIO_BYTES, max(1, int(self.settings.speech_max_bytes)))
+                    if int(voice.get("file_size") or 0) > byte_limit:
+                        bot_resp = BotResponse(text="❌ Голосовое сообщение слишком большое. Максимальный размер — 20 МБ.")
+                        await self.send_new_screen(client, chat_id, bot_resp.text, delete_previous_bot_msg=True)
+                        await self._safe_delete_message(client, chat_id, incoming_message_id)
+                        return
+                    try:
+                        f_resp = await client.get(f"{self.base_url}/getFile", params={"file_id": voice["file_id"]})
+                        f_resp.raise_for_status()
+                        f_data = f_resp.json()
+                        if not f_data.get("ok"):
+                            raise ValueError("Telegram не вернул путь к аудиофайлу")
+                        file_info = f_data["result"]
+                        if int(file_info.get("file_size") or 0) > byte_limit:
+                            raise ValueError("Аудиозапись превышает допустимый размер 20 МБ")
+                        file_path = file_info["file_path"]
+                        content_bytes = bytearray()
+                        async with client.stream("GET", f"{self.file_url}/{file_path}") as download:
+                            download.raise_for_status()
+                            async for chunk in download.aiter_bytes():
+                                content_bytes.extend(chunk)
+                                if len(content_bytes) > byte_limit:
+                                    break
+                        if len(content_bytes) > byte_limit:
+                            raise ValueError("Аудиозапись превышает допустимый размер 20 МБ")
+                        filename = file_path.rsplit("/", 1)[-1] or "voice.ogg"
+                        content_type = "audio/ogg" if filename.lower().endswith(".oga") else "audio/ogg"
+                        transcript = await transcribe_audio(bytes(content_bytes), filename, content_type, self.settings)
+                    except (SpeechUnavailable, ValueError) as exc:
+                        bot_resp = BotResponse(text=f"❌ {exc}")
+                        await self.send_new_screen(client, chat_id, bot_resp.text, delete_previous_bot_msg=True)
+                        await self._safe_delete_message(client, chat_id, incoming_message_id)
+                        return
+                    except httpx.TimeoutException:
+                        bot_resp = BotResponse(text="❌ Превышено время ожидания при загрузке или распознавании голосового сообщения. Попробуйте ещё раз.")
+                        await self.send_new_screen(client, chat_id, bot_resp.text, delete_previous_bot_msg=True)
+                        await self._safe_delete_message(client, chat_id, incoming_message_id)
+                        return
+                    except httpx.HTTPError:
+                        bot_resp = BotResponse(text="❌ Не удалось загрузить голосовое сообщение из Telegram. Попробуйте ещё раз.")
+                        await self.send_new_screen(client, chat_id, bot_resp.text, delete_previous_bot_msg=True)
+                        await self._safe_delete_message(client, chat_id, incoming_message_id)
+                        return
+                    # Keep the transcript visible alongside the bot's answer.
+                    await self.send_new_screen(client, chat_id, f"🎤 Распознано: {html.escape(transcript)}", parse_mode="HTML",
+                                               delete_previous_bot_msg=False)
+                    bot_resp = self.router.handle_message(user_id, transcript)
                     await self.send_new_screen(client, chat_id, bot_resp.text, bot_resp.reply_markup,
-                                               bot_resp.parse_mode, delete_previous_bot_msg=True)
+                                               bot_resp.parse_mode, delete_previous_bot_msg=False)
                     await self._safe_delete_message(client, chat_id, incoming_message_id)
                     return
 

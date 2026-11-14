@@ -5,7 +5,7 @@ import pytest
 
 from src.db.connection import Database
 from src.db.migrations import apply_migrations
-from src.services.gkz_parser import ADDRESS, CITY, SOURCE_URL, VENUE, parse_gkz_html
+from src.services.gkz_parser import ADDRESS, CITY, SOURCE_URL, VENUE, parse_gkz_html, parse_gkz_detail_html
 from src.services.import_service import ImportService
 
 
@@ -44,6 +44,20 @@ def _card(*, start="2026-11-14", time="18:00", href="/events/example/", title="�
 ])
 def test_incomplete_or_invalid_cards_are_skipped(html):
     assert parse_gkz_html(html) == []
+
+
+def test_structured_event_details_replace_cut_listing_excerpt():
+    metadata = json.dumps({"@type": "Event", "startDate": "2026-11-14",
+                           "description": "Полное описание спектакля, которое продолжается после вводного предложения.",
+                           "offers": {"price": "750", "priceCurrency": "RUB"}}, ensure_ascii=False)
+    html = f'''<script type="application/ld+json">{metadata}</script>
+    <article class="mec-event-article"><a class="mec-color-hover" href="/events/example/">Спектакль</a>
+    <div class="mec-event-description">Краткий анонс обрывается на запятой,</div>
+    <span class="mec-start-time">18:00</span></article>'''
+    item = parse_gkz_html(html)[0]
+    assert item["description"].endswith("предложения.")
+    assert item["price_min"] == 750
+    assert parse_gkz_detail_html('<div class="mec-single-event-description"><p>Полный текст события на странице организатора.</p></div>')["description"] == "Полный текст события на странице организатора."
 
 
 def test_import_keeps_gkz_events_as_drafts_and_is_idempotent():

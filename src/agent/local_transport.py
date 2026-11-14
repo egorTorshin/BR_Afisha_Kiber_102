@@ -18,7 +18,9 @@ def _post(base_url: str, body: dict, timeout: float, client: httpx.Client | None
     sender = client or httpx.Client()
     started = time.perf_counter()
     recorder = current_recorder()
-    row = {"route": "LIGHT" if (body.get("response_format", {}).get("json_schema", {}).get("name") == "light_output") else "HEAVY",
+    schema_name = body.get("response_format", {}).get("json_schema", {}).get("name")
+    row = {"route": {"smart_output": "SMART", "light_output": "LIGHT",
+                     "structured_deep_plan": "STRUCTURED_DEEP"}.get(schema_name, "HEAVY"),
            "model_alias": body.get("model"), "prompt_tokens": 0, "completion_tokens": 0,
            "completion_length": 0, "finish_reason": None, "http_status": None,
            "json_parse": "not_checked", "schema_validation": "not_checked",
@@ -32,6 +34,12 @@ def _post(base_url: str, body: dict, timeout: float, client: httpx.Client | None
                             inference_latency_ms=elapsed_ms(started))
         response.raise_for_status()
         data = response.json()
+        timings = data.get("timings") if isinstance(data, dict) else None
+        def timing(key):
+            value = timings.get(key) if isinstance(timings, dict) else None
+            return round(value, 3) if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else "unavailable"
+        if recorder:
+            recorder.update(index, prefill_ms=timing("prompt_ms"), decode_ms=timing("predicted_ms"))
         choices = data.get("choices") or []
         choice = choices[0] if choices else {}
         message = choice.get("message") or {}

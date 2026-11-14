@@ -20,13 +20,15 @@ class FakeResponse:
 
 
 class FakeClient:
-    def __init__(self, content):
+    def __init__(self, content, timings=None):
         self.content = content
+        self.timings = timings
 
     def post(self, *args, **kwargs):
         return FakeResponse({"choices": [{"message": {"content": self.content},
                                           "finish_reason": "stop"}],
-                             "usage": {"prompt_tokens": 17, "completion_tokens": 9}})
+                             "usage": {"prompt_tokens": 17, "completion_tokens": 9},
+                             "timings": self.timings})
 
 
 def test_local_inference_trace_records_safe_schema_and_usage_metadata():
@@ -52,6 +54,22 @@ def test_local_inference_trace_records_safe_schema_and_usage_metadata():
     assert row["json_parse"] == "success"
     assert row["schema_validation"] == "success"
     assert "message" not in row and "completion" not in row
+    assert row["prefill_ms"] == "unavailable" and row["decode_ms"] == "unavailable"
+
+
+def test_local_inference_trace_records_llama_server_prefill_and_decode():
+    recorder = InferenceRecorder("req-timing", "session", 1)
+    token = activate(recorder)
+    try:
+        transport = LocalLightTransport("http://localhost:8082/v1", client=FakeClient(
+            json.dumps({"intent": "clarify", "constraint_patch": {},
+                        "tool_proposal": None, "clarification": "Уточните город"}),
+            {"prompt_ms": 12.375, "predicted_ms": 8.125}))
+        transport.parse(model="qwen2.5-3b-local", payload={"message": "synthetic"}, timeout=1)
+    finally:
+        deactivate(token)
+    assert recorder.rows[0]["prefill_ms"] == 12.375
+    assert recorder.rows[0]["decode_ms"] == 8.125
 
 
 def test_local_inference_trace_marks_schema_failure_without_raw_output():

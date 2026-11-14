@@ -32,7 +32,7 @@ async def async_main() -> None:
             "TELEGRAM_BOT_TOKEN is not configured or uses placeholder. Service initialized DB & seed data and is running in local standby mode. Use 'python -m src.cli' for interactive CLI queries or set TELEGRAM_BOT_TOKEN in .env.",
         )
     else:
-        runner = TelegramPollingRunner(token=token, router=router, log_level=settings.log_level)
+        runner = TelegramPollingRunner(token=token, router=router, log_level=settings.log_level, settings=settings)
         runners.append(runner.run_forever())
     if settings.max_bot_enabled:
         if not settings.max_bot_token:

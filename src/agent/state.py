@@ -23,6 +23,7 @@ class DialogueState(ContractModel):
     shown_event_ids: list[str] = Field(default_factory=list)
     selected_event_id: str | None = None
     last_user_intent: str | None = None
+    fast_context_safe: bool = False
     pending_clarification: str | None = None
     pending_confirmation: ToolCall | None = None
     executed_action_keys: list[str] = Field(default_factory=list)

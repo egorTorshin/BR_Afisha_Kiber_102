@@ -54,7 +54,8 @@ def final(kind="recommendation", ids=None, conflicts=None):
             "input_tokens": 8, "output_tokens": 3}
 
 
-def setup(steps, *, events=None, state=None, limits=None, message="Найди и сравни концерты"):
+def setup(steps, *, events=None, state=None, limits=None, message="Найди и сравни концерты",
+          single_pass=False):
     executed = []
     def search(args):
         executed.append(args)
@@ -69,10 +70,65 @@ def setup(steps, *, events=None, state=None, limits=None, message="Найди и
         ToolDefinition("subscribe", SubscribeInput, SubscribeOutput, subscribe, ToolMetadata(True, True)),
     ], limits=limits)
     transport = ScriptedTransport(steps)
-    provider = HeavyLLMProvider(Settings(heavy_model="gpt-4.1"), registry, transport=transport)
+    provider = HeavyLLMProvider(Settings(heavy_model="gpt-4.1", heavy_single_pass=single_pass), registry, transport=transport)
     decision = provider.run(message, state or DialogueState(conversation_id="c"),
                             today=date(2026, 11, 13))
     return decision, transport, executed
+
+
+def test_unspecified_pair_clarifies_without_tool_or_generation():
+    decision, transport, executed = setup([], message="Сравни два концерта и объясни, какой лучше")
+    assert decision.result.kind == "clarification"
+    assert decision.stop_reason == "clarification"
+    assert not transport.messages and not executed
+
+
+def test_single_pass_search_uses_one_generation_and_tool_verified_ids():
+    decision, transport, executed = setup(
+        [call(args={"city": "Уфа", "category": "концерт"})],
+        single_pass=True, message="Найди концерты в Уфе")
+    assert decision.execution_mode == "single_pass"
+    assert decision.steps == 1 and len(transport.messages) == 1
+    assert decision.result.kind == "recommendation"
+    assert decision.basis_event_ids == ["e1", "e2"]
+    assert len(executed) == 1
+
+
+def test_single_pass_empty_results_are_grounded_no_data():
+    decision, transport, _ = setup([call()], events=[], single_pass=True,
+                                   message="Найди концерты")
+    assert len(transport.messages) == 1
+    assert decision.execution_mode == "single_pass"
+    assert decision.result.kind == "no_data" and decision.basis_event_ids == []
+
+
+def test_single_pass_contextual_refinement_preserves_saved_filters():
+    state = DialogueState(conversation_id="c", active_constraints=ConstraintSet(city="Уфа", category="концерт"),
+                          has_previous_results=True, last_result_ids=["old"])
+    decision, _, executed = setup([call(args={"city": "Салават", "category": "кино", "date_from": "2026-11-15"})],
+                                  state=state, single_pass=True, message="А в воскресенье?")
+    assert decision.execution_mode == "single_pass"
+    assert executed[0].city == "Уфа" and executed[0].category == "концерт"
+    assert executed[0].date_from is not None
+
+
+def test_single_pass_keeps_comparison_on_full_heavy_path():
+    decision, transport, _ = setup([call(), call("search_events", {"max_price": 100}, "c2"),
+                                    final(ids=["e1", "e2"])], single_pass=True,
+                                   message="Сравни концерты и найди самый дешёвый")
+    assert decision.execution_mode == "full"
+    assert len(transport.messages) == 3
+
+
+def test_single_pass_never_accepts_model_invented_id_or_invalid_tool():
+    invalid, _, _ = setup([call("run_sql", {"sql": "SELECT 1"})], single_pass=True,
+                          message="Найди концерты")
+    assert invalid.execution_mode == "full"
+    assert invalid.basis_event_ids == []
+    ghost, _, _ = setup([call(), final(ids=["ghost"])], single_pass=True,
+                        message="Сравни концерты")
+    assert ghost.stop_reason == "unverified_event_id"
+    assert ghost.basis_event_ids == []
 
 
 def test_multi_step_query_and_trace():
@@ -205,6 +261,55 @@ def test_similar_but_cheaper_uses_two_registered_tools():
         "Что ещё похожее, но дешевле?", DialogueState(conversation_id="c"))
     assert seen == [("similar", "e1"), ("search", 100)]
     assert decision.basis_event_ids == ["e2"]
+
+
+@pytest.mark.parametrize("invalid_id", [None, "null", " NULL ", "", "  ", "none", "undefined", "n/a", "<event_id>"])
+def test_f06_missing_similar_anchor_clarifies_without_tool_loop(invalid_id):
+    seen = []
+    registry = ToolRegistry([ToolDefinition(
+        "find_similar", FindSimilarInput, FindSimilarOutput,
+        lambda args: seen.append(args.event_id) or FindSimilarOutput(events=[]))])
+    transport = ScriptedTransport([call("find_similar", {"event_id": invalid_id})] * 5)
+    decision = HeavyLLMProvider(Settings(heavy_model="gpt-4.1"), registry, transport=transport).run(
+        "Покажи похожие мероприятия", DialogueState(conversation_id="c"))
+    assert decision.result.kind == "clarification"
+    assert decision.stop_reason == "missing_similar_event"
+    assert len(transport.messages) == 1
+    assert seen == []
+
+
+def test_c01_comparison_rejects_find_similar_and_can_search():
+    seen = []
+    registry = ToolRegistry([
+        ToolDefinition("find_similar", FindSimilarInput, FindSimilarOutput,
+                       lambda args: seen.append("similar") or FindSimilarOutput(events=[])),
+        ToolDefinition("search_events", SearchEventsInput, SearchEventsOutput,
+                       lambda args: seen.append("search") or SearchEventsOutput(
+                           events=[event("e1"), event("e2", price=100)], total=2)),
+    ])
+    transport = ScriptedTransport([call("find_similar", {"event_id": "null"}),
+                                   call("search_events"), final(ids=["e1", "e2"])])
+    decision = HeavyLLMProvider(Settings(heavy_model="gpt-4.1"), registry, transport=transport).run(
+        "Сравни концерты в Уфе и Стерлитамаке по цене", DialogueState(conversation_id="c"))
+    assert decision.result.kind == "recommendation"
+    assert decision.basis_event_ids == ["e1", "e2"]
+    assert seen == ["search"]
+
+
+def test_unknown_similar_anchor_does_not_repeat_not_found_tool():
+    from src.agent.schemas import ToolError, ToolResult
+    registry = ToolRegistry([ToolDefinition("find_similar", FindSimilarInput, FindSimilarOutput,
+                                          lambda args: FindSimilarOutput(events=[]))])
+    calls = []
+    def not_found(name, arguments, **kwargs):
+        calls.append(name)
+        return ToolResult(name=name, error=ToolError(code="not_found", message="missing"))
+    registry.execute = not_found
+    transport = ScriptedTransport([call("find_similar", {"event_id": "missing"})] * 5)
+    decision = HeavyLLMProvider(Settings(heavy_model="gpt-4.1"), registry, transport=transport).run(
+        "Покажи похожие", DialogueState(conversation_id="c"))
+    assert decision.result.kind == "clarification"
+    assert calls == ["find_similar"] and len(transport.messages) == 1
 
 
 def test_conflict_and_no_data():
@@ -354,6 +459,47 @@ def test_compact_continuation_strips_raw_fields_and_caps_top_n():
     assert "e7" in continuation and "e8" not in continuation
     assert "source_url" not in continuation and "description" not in continuation
     assert "UNTRUSTED_DATA" not in continuation
+
+
+def test_compact_flag_removes_only_duplicate_candidate_payload():
+    from src.agent.heavy_llm import compact_tool_result
+    from src.agent.schemas import ToolResult
+    source = event("e1").model_dump(mode="json")
+    source.update({"status": "cancelled", "is_free": True,
+                   "lat": 54.735, "lon": 55.958, "duration_min": 90,
+                   "address": "Уфа, улица Ленина, 1", "language": "ru"})
+    tool_result = ToolResult(name="search_events", result_ids=["e1"],
+                             payload={"events": [source], "total": 1})
+    compact = compact_tool_result(tool_result, limit=8)
+    assert compact["events"][0].items() >= {k: source[k] for k in (
+        "title", "date_start", "date_end", "city", "venue", "price_min", "price_max",
+        "category", "age_limit", "status", "is_free", "lat", "lon",
+        "duration_min", "address", "language") if source[k] is not None}.items()
+    events = [event("e1"), event("e2", price=100)]
+    full, full_transport, _ = setup([call(), final(ids=["e1"])], events=events)
+    # The same scripted model choice must remain grounded in both modes.
+    from src.agent.tools import SearchEventsInput
+    registry = ToolRegistry([ToolDefinition("search_events", SearchEventsInput, SearchEventsOutput,
+                           lambda args: SearchEventsOutput(events=events, total=2))])
+    compact_transport = ScriptedTransport([call(), final(ids=["e1"])])
+    compact_decision = HeavyLLMProvider(Settings(heavy_model="gpt-4.1", heavy_compact_continuation=True),
+                                        registry, transport=compact_transport).run(
+        "Найди и сравни концерты", DialogueState(conversation_id="c"))
+    assert full.basis_event_ids == compact_decision.basis_event_ids
+    assert len(str(compact_transport.messages[1])) < len(str(full_transport.messages[1]))
+    assert "price_min" in str(compact_transport.messages[1])
+
+
+def test_compact_repair_keeps_candidates_when_tool_protocol_is_omitted():
+    events = [event("e1")]
+    registry = ToolRegistry([ToolDefinition("search_events", SearchEventsInput, SearchEventsOutput,
+                           lambda args: SearchEventsOutput(events=events, total=1))])
+    transport = ScriptedTransport([call(), {"calls": [], "final": None}, final(ids=["e1"])])
+    decision = HeavyLLMProvider(Settings(heavy_model="gpt-4.1", heavy_compact_continuation=True),
+                                registry, transport=transport).run(
+        "Найди и сравни концерты", DialogueState(conversation_id="c"))
+    assert decision.basis_event_ids == ["e1"]
+    assert "e1" in str(transport.messages[2])
 
 
 def test_context_uses_last_four_turns_and_stays_within_budget():

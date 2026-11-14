@@ -1,8 +1,0 @@
-# Temporary loopback-only model access for local benchmarks; do not deploy this overlay.
-services:
-  router:
-    ports:
-      - "127.0.0.1:18081:8001"
-  local-llm:
-    ports:
-      - "127.0.0.1:18082:8080"

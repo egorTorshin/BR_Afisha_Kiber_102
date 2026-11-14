@@ -79,8 +79,8 @@ export function AgentChat({ compact = false }: { compact?: boolean }) {
     <div className={`agent-chat ${compact ? "agent-chat-compact" : ""}`}>
       <form className="agent-chat-form" onSubmit={submit}>
         <label className="sr-only" htmlFor="agent-message">Опишите нужное событие</label>
-        <VoiceInput disabled={pending} onText={(text) => setMessage((current) => current ? `${current} ${text}` : text)} />
         <input id="agent-message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Например: бесплатные выставки в Уфе…" maxLength={4000} disabled={pending} />
+        <VoiceInput disabled={pending} onText={(text) => setMessage((current) => current ? `${current} ${text}` : text)} />
         <button className="button" type="submit" disabled={pending || !message.trim()}>{pending ? "Ищем…" : "Спросить"} <Send size={16} /></button>
       </form>
       {note && <p className="agent-search-note" role="status">{note}</p>}
