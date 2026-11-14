@@ -23,6 +23,9 @@ class ConstraintPatch(ContractModel):
     category: str | None = None
     date_from: str | None = None
     date_to: str | None = None
+    time_after: str | None = None
+    time_before: str | None = None
+    max_duration_min: int | None = None
     max_price: int | None = None
     is_free_only: bool | None = None
     max_age_limit: int | None = None
@@ -163,7 +166,7 @@ class LightLLMProvider:
         payload = {
             "message": re.sub(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "[email]",
                               re.sub(r"(?<!\d)(?:\+7|8)[\s(\d)-]{10,16}(?!\d)", "[phone]", message)),
-            "current_date": (today or date.today()).isoformat(),
+            "current_date": (today or self.settings.get_reference_date()).isoformat(),
             "active_constraints": state.active_constraints.model_dump(mode="json", exclude_none=True),
             "has_previous_results": state.has_previous_results,
             "next_search_offset": state.next_search_offset,
@@ -239,12 +242,16 @@ class LightLLMProvider:
             return result("missing_previous_results")
         try:
             patch = output.constraint_patch.model_dump(exclude_none=True)
-            deterministic = parse_free_text_query(message, today or date.today())
+            deterministic = parse_free_text_query(message, ref_date=today or self.settings.get_reference_date(),
+                                                  db=getattr(self.registry, "db", None))
             deterministic_patch = {
                 "city": deterministic.city,
                 "category": deterministic.category,
                 "date_from": deterministic.date_from[:10] if deterministic.date_from else None,
                 "date_to": deterministic.date_to[:10] if deterministic.date_to else None,
+                "time_after": deterministic.time_after,
+                "time_before": deterministic.time_before,
+                "max_duration_min": deterministic.max_duration_min,
                 "max_price": deterministic.max_price,
                 "is_free_only": True if deterministic.is_free_only else None,
                 "max_age_limit": deterministic.max_age_limit,

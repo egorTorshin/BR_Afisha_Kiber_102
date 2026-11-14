@@ -69,6 +69,30 @@ services:
       LIGHT_LLM_MAX_TOKENS: ${LIGHT_LLM_MAX_TOKENS:-384}
       HEAVY_LLM_MAX_TOKENS: ${HEAVY_LLM_MAX_TOKENS:-512}
 
+  bot:
+    mem_limit: 1g
+    depends_on:
+      router:
+        condition: service_healthy
+      local-llm:
+        condition: service_healthy
+    networks:
+      default: {}
+      ai-internal: {}
+    environment:
+      AI_MODE: local-ai
+      JEV_ENABLED: "true"
+      JEV_ENDPOINT: http://router:8001/decide
+      JEV_MODEL: qwen2.5-1.5b-router
+      JEV_TIMEOUT_SECONDS: ${JEV_TIMEOUT_SECONDS:-15}
+      LOCAL_LLM_BASE_URL: http://local-llm:8080/v1
+      LIGHT_LLM_MODEL: qwen2.5-3b-local
+      HEAVY_LLM_MODEL: qwen2.5-3b-local
+      LIGHT_LLM_TIMEOUT_SECONDS: ${LIGHT_LLM_TIMEOUT_SECONDS:-25}
+      HEAVY_LLM_TIMEOUT_SECONDS: ${HEAVY_LLM_TIMEOUT_SECONDS:-90}
+      LIGHT_LLM_MAX_TOKENS: ${LIGHT_LLM_MAX_TOKENS:-384}
+      HEAVY_LLM_MAX_TOKENS: ${HEAVY_LLM_MAX_TOKENS:-512}
+
 networks:
   ai-internal:
     internal: true

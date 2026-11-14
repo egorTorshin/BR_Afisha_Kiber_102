@@ -19,6 +19,9 @@ class ConstraintSet(ContractModel):
     category: str | None = None
     date_from: date | None = None
     date_to: date | None = None
+    time_after: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    time_before: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    max_duration_min: int | None = Field(default=None, ge=1)
     max_price: int | None = Field(default=None, ge=0)
     is_free_only: bool = False
     max_age_limit: int | None = Field(default=None, ge=0, le=18)

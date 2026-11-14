@@ -2,12 +2,17 @@ import json
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+from src.agent.schemas import AgentResponse, ToolCall
 from src.bot.router import BotRouter
 from src.config import Settings
 from src.db.connection import Database
 from src.db.migrations import apply_migrations, seed_dictionaries
+from src.db.roles import ROLE_TABLES
 from src.models.schemas import SearchFilters
 from src.services.import_service import ImportService
+from src.services.agent_service import AgentRunResult
 from src.services.normalizer import parse_free_text_query, resolve_city
 from src.services.search_service import SearchService
 from src.services.subscription_service import SubscriptionService
@@ -27,6 +32,7 @@ class TestAfishaLevel1(unittest.TestCase):
             reference_date_str="2026-11-13",
             data_dir=self.base_dir / "data",
             migrations_dir=self.base_dir / "migrations",
+            ai_mode="no-ai",
         )
         self.db = Database(":memory:")
         apply_migrations(self.db, self.settings.migrations_dir)
@@ -117,17 +123,18 @@ class TestAfishaLevel1(unittest.TestCase):
         self.assertIn("Ревизор", resp.text)
 
     def test_05_end_to_end_bot_scenario_and_3_clicks_to_card(self) -> None:
-        """Сквозной сценарий: /start -> фильтр -> выдача 3-5 карточек -> карточка (не более 3 действий) -> подписка и отписка."""
-        # Пользователь уже завершил обязательный выбор языка и регистрацию профиля.
-        self.router.profile_service.ensure("user_42", "ru")
-        self.router.profile_service.update("user_42", onboarding_state="complete")
+        """Сквозной сценарий: /start -> выдача -> карточка; фильтры и подписки доступны отдельно."""
         # Действие 1: /start
         r1 = self.router.handle_message("user_42", "/start")
-        self.assertIn("Доброго времени суток", r1.text)
-        self.assertEqual(r1.reply_markup["inline_keyboard"][0][0]["callback_data"], "profile:open")
-
-        # Действие 2: выбор города Уфа
-        r2 = self.router.handle_callback("user_42", "city:Уфа")
+        self.assertIn("Афиша культурных мероприятий Башкортостана", r1.text)
+        self.assertIn("Показать события (18)", r1.reply_markup["inline_keyboard"][0][0]["text"])
+        self.assertIn("не является официальным сайтом", r1.text)
+        menu = r1.reply_markup["inline_keyboard"]
+        self.assertEqual(len(menu), 2)
+        self.assertEqual([button["callback_data"] for button in menu[0]],
+                         ["search:run", "menu:filters"])
+        # Действие 2: сразу открыть выдачу.
+        r2 = self.router.handle_callback("user_42", "search:run")
         self.assertIn("Найдено событий", r2.text)
 
         # Действие 3: открытие карточки первого события из кнопки выдачи
@@ -139,19 +146,47 @@ class TestAfishaLevel1(unittest.TestCase):
         self.assertIn("Адрес:", r3.text)
         self.assertIn("Источник:", r3.text)
 
+        filter_screen = self.router.handle_callback("user_42", "menu:filters")
+        filter_actions = [button["callback_data"] for row in filter_screen.reply_markup["inline_keyboard"] for button in row]
+        self.assertIn("menu:cities", filter_actions)
+        self.assertIn("preset:weekend", filter_actions)
+        filtered = self.router.handle_callback("user_42", "city:Уфа")
+        self.assertIn("Уфа", filtered.text)
+
         # Подписка на город и категорию
         r_sub = self.router.handle_callback("user_42", "sub:Уфа:концерт")
         self.assertIn("Подписка оформлена", r_sub.text)
         subs = self.sub_service.list_subscriptions("user_42")
         self.assertEqual(len(subs), 1)
 
-        # Новый интерфейс переключает подписку повторным нажатием на неё.
-        r_unsub = self.router.handle_callback("user_42", "sub_toggle:Уфа:концерт")
-        self.assertIn("Подписка удалена", r_unsub.text)
+        r_unsub = self.router.handle_message("user_42", "/unsubscribe")
+        self.assertIn("отписаны от всех уведомлений", r_unsub.text)
+        self.assertEqual(len(self.sub_service.list_subscriptions("user_42")), 0)
+        self.router.handle_callback("user_42", "sub:Уфа:концерт")
+        self.router.handle_callback("user_42", "sub_toggle:Уфа:концерт")
         self.assertEqual(len(self.sub_service.list_subscriptions("user_42")), 0)
 
     def test_06_control_queries_and_typo_and_empty_explanation(self) -> None:
         """Проверка контрольных запросов из Раздела 2 и Приложения А (включая опечатки и объяснение пустого результата)."""
+        for action, tables in (("SELECT", ("agent_sessions", "agent_dialogue_states", "agent_traces")),
+                               ("INSERT", ("agent_sessions", "agent_dialogue_states", "agent_traces")),
+                               ("DELETE", ("agent_sessions", "agent_dialogue_states"))):
+            self.assertTrue(set(tables).issubset(ROLE_TABLES["afisha_bot"][action]))
+
+        natural_query = "Куда сходить с детьми в Уфе на этих выходных?"
+        natural_filters = parse_free_text_query(natural_query, self.settings.get_reference_date(), db=self.db)
+        self.assertEqual((natural_filters.city, natural_filters.date_preset, natural_filters.max_age_limit),
+                         ("Уфа", "weekend", 6))
+        self.assertIsNone(natural_filters.query_text)
+        with patch.object(self.router.agent_service, "get_or_create_principal", side_effect=RuntimeError("agent DB unavailable")):
+            natural_response = self.router.handle_message("user_natural", natural_query)
+        self.assertIn("Найдено событий", natural_response.text)
+        self.assertEqual(self.router.get_user_filters("user_natural").city, "Уфа")
+        self.assertIn("Уфа", self.router.handle_callback("user_natural", "menu:filters").text)
+        self.router.handle_callback("user_natural", "city:Стерлитамак")
+        self.assertEqual(self.router.get_user_filters("user_natural").city, "Стерлитамак")
+        self.assertEqual(self.router.get_user_filters("user_natural").date_preset, "weekend")
+
         # 1. Опечатка в названии города: «Концерт в стерлитакмае в субботу»
         self.assertEqual(resolve_city("стерлитакмае", db=self.db), "Стерлитамак")
         r_typo = self.router.handle_message("user_5", "Концерт в стерлитакмае в субботу")
@@ -211,17 +246,14 @@ class TestAfishaLevel1(unittest.TestCase):
         import asyncio
         from src.bot.telegram_runner import TelegramPollingRunner
 
-        # Новый пользователь сначала выбирает язык, затем завершает согласованный онбординг.
         r_start = self.router.handle_message("user_99", "/start")
-        self.assertIn("Выберите язык", r_start.text)
-        self.assertEqual(r_start.reply_markup["inline_keyboard"][0][0]["callback_data"], "lang:ru")
-        r_name = self.router.handle_callback("user_99", "lang:ru")
-        self.assertIn("Введите ваше имя", r_name.text)
-        self.router.handle_message("user_99", "Айгуль")
-        self.router.handle_message("user_99", "+79990000000")
-        self.router.handle_callback("user_99", "onboarding:skip_city")
-        r_home = self.router.handle_message("user_99", "/start")
-        self.assertEqual(r_home.reply_markup["inline_keyboard"][0][1]["callback_data"], "leisure:start")
+        self.assertIn("Подходящих событий в базе: <b>18</b>", r_start.text)
+        self.assertIn("Показать события (18)", r_start.reply_markup["inline_keyboard"][0][0]["text"])
+        profile = self.router.handle_callback("user_99", "profile:open")
+        self.assertEqual([button["callback_data"] for button in profile.reply_markup["inline_keyboard"][0]],
+                         ["profile_lang:ru", "profile_lang:ba", "profile_lang:en"])
+        self.assertEqual(len(profile.reply_markup["inline_keyboard"]), 3)
+        self.assertEqual(self.router.profile_service.get("user_99")["onboarding_state"], "complete")
 
         r_cities = self.router.handle_callback("user_99", "menu:cities")
         cities_flat = [btn["text"] for row in r_cities.reply_markup["inline_keyboard"] for btn in row]
@@ -283,6 +315,67 @@ class TestAfishaLevel1(unittest.TestCase):
         asyncio.run(run_ui_flow())
         methods = [m for m, _ in called_endpoints]
         self.assertEqual(methods, ["sendMessage", "deleteMessage", "answerCallbackQuery", "editMessageText", "sendMessage", "deleteMessage", "deleteMessage"])
+
+    def test_10_agent_query_preserves_editable_search_filters(self) -> None:
+        self.settings.ai_mode = "local-ai"
+        query = "Куда сходить с детьми в Уфе на этих выходных?"
+        result = AgentRunResult(
+            response=AgentResponse(message="Подобрал события в Уфе на выходные.", event_cards=[], trace_id="trace-1"),
+            status="no_data", conversation_id="conversation-1", request_id="trace-1",
+        )
+        trace = SimpleNamespace(tool_calls=[ToolCall(name="search_events", arguments={
+            "city": "Уфа", "date_from": "2026-11-14", "date_to": "2026-11-15",
+            "max_age_limit": 6, "text": query, "limit": 20,
+        })])
+        with (patch.object(self.router.agent_service, "get_or_create_principal", return_value=("token", "conversation-1")),
+              patch.object(self.router.agent_service, "chat", return_value=result),
+              patch.object(self.router.agent_service, "get_trace", return_value=trace)):
+            response = self.router.handle_message("user_agent", query)
+
+        filters = self.router.get_user_filters("user_agent")
+        self.assertEqual((filters.city, filters.date_preset, filters.max_age_limit), ("Уфа", "weekend", 6))
+        self.assertIsNone(filters.query_text)
+        self.assertIn("Фильтры:", response.text)
+        self.assertIn("menu:filters", [button["callback_data"]
+                                       for row in response.reply_markup["inline_keyboard"] for button in row])
+
+        filter_screen = self.router.handle_callback("user_agent", "menu:filters")
+        self.assertIn("Уфа", filter_screen.text)
+        self.assertIn("На выходных", filter_screen.text)
+        self.router.handle_callback("user_agent", "city:Стерлитамак")
+        self.assertEqual(filters.city, "Стерлитамак")
+        self.assertEqual(filters.date_preset, "weekend")
+        self.assertEqual(filters.max_age_limit, 6)
+
+        filters.query_text = "джаз"
+        filter_screen = self.router.handle_callback("user_agent", "menu:filters")
+        self.assertIn("filter_clear:query_text", [button["callback_data"]
+                                                   for row in filter_screen.reply_markup["inline_keyboard"] for button in row])
+        self.router.handle_callback("user_agent", "filter_clear:query_text")
+        self.assertIsNone(filters.query_text)
+        self.assertEqual(filters.city, "Стерлитамак")
+
+    def test_11_manual_filter_edit_reaches_next_agent_turn(self) -> None:
+        uid = "user_followup"
+        first = self.router.handle_message(uid, "Концерт в Уфе на выходных")
+        self.assertIn("Найдено событий", first.text)
+        conversation_id = self.router._agent_conversations[uid]
+
+        self.router.handle_callback(uid, "city:Стерлитамак")
+        self.assertIn(uid, self.router._manually_edited_filters)
+
+        def check_synced_state(*args, **kwargs):
+            state = self.router.agent_service.dialogue_repo.get(conversation_id)
+            self.assertEqual(state.active_constraints.city, "Стерлитамак")
+            self.assertEqual(state.active_constraints.date_from.isoformat(), "2026-11-14")
+            return AgentRunResult(
+                response=AgentResponse(message="Уточните запрос.", trace_id="trace-followup"),
+                status="clarification", conversation_id=conversation_id, request_id="trace-followup",
+            )
+
+        with patch.object(self.router.agent_service, "chat", side_effect=check_synced_state):
+            self.router.handle_message(uid, "А ещё вечером?")
+        self.assertNotIn(uid, self.router._manually_edited_filters)
 
 
 if __name__ == "__main__":

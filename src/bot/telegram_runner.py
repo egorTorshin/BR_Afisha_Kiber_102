@@ -229,12 +229,7 @@ class TelegramPollingRunner:
                     return
 
                 if "contact" in msg:
-                    contact = msg["contact"]
-                    # Never trust a forwarded contact as the user's own registration phone.
-                    if str(contact.get("user_id", user_id)) != user_id:
-                        bot_resp = BotResponse(text="Пожалуйста, отправьте свой номер кнопкой в этом чате.")
-                    else:
-                        bot_resp = self.router.handle_contact(user_id, str(contact.get("phone_number", "")))
+                    bot_resp = BotResponse(text="Для поиска номер телефона не нужен. Напишите запрос или откройте /start.")
                     await self.send_new_screen(client, chat_id, bot_resp.text, bot_resp.reply_markup,
                                                bot_resp.parse_mode, delete_previous_bot_msg=True)
                     await self._safe_delete_message(client, chat_id, incoming_message_id)

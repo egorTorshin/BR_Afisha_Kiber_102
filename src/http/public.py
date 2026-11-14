@@ -6,10 +6,11 @@ from fastapi import APIRouter, HTTPException, Query
 from src.db.connection import Database
 from src.http.schemas import (CategoryItem, CityItem, EventPage, EventQuery, FeedbackInput,
                               HealthResponse, PublicEvent, VenueItem, VersionedEventPage,
-                              VersionedEventQuery)
+                              VersionedEventQuery, SubscriptionInput)
 from src.models.schemas import FeedbackRecord, SearchFilters
 from src.services.feedback_service import FeedbackService
 from src.services.search_service import SearchService
+from src.services.subscription_service import SubscriptionService
 from src.http.errors import run_service
 from src.utils.metrics import DATABASE_UP, DATABASE_LATENCY
 import time
@@ -19,6 +20,7 @@ def create_public_router(database: Database) -> APIRouter:
     router = APIRouter()
     search = SearchService(database)
     feedback = FeedbackService(database)
+    subscriptions = SubscriptionService(database)
 
     @router.get("/events", response_model=EventPage)
     def list_events(query: Annotated[EventQuery, Query()]):
@@ -68,6 +70,7 @@ def create_public_router(database: Database) -> APIRouter:
             raise HTTPException(status_code=404, detail="Событие не найдено")
         return result
 
+    @router.post("/api/v1/feedback", response_model=FeedbackRecord, status_code=201)
     @router.post("/feedback", response_model=FeedbackRecord, status_code=201)
     def submit_feedback(data: FeedbackInput):
         event_id = data.event_id
@@ -77,5 +80,24 @@ def create_public_router(database: Database) -> APIRouter:
                 raise HTTPException(status_code=404, detail="Событие не найдено")
             event_id = event.id
         return run_service(feedback.submit, data.message, event_id, actor="api:anonymous")
+
+    @router.get("/api/v1/subscriptions")
+    def list_subscriptions(subscriber_id: str = Query(min_length=1, max_length=128)):
+        return run_service(subscriptions.list_subscriptions, subscriber_id)
+
+    @router.post("/api/v1/subscriptions", status_code=201)
+    def create_subscription(data: SubscriptionInput):
+        return run_service(subscriptions.subscribe, data.subscriber_id, data.city, data.category)
+
+    @router.delete("/api/v1/subscriptions/{subscription_id}")
+    def delete_subscription(subscription_id: str, subscriber_id: str = Query(min_length=1, max_length=128)):
+        deleted = run_service(subscriptions.unsubscribe_by_id, subscriber_id, subscription_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Подписка не найдена")
+        return {"deleted": deleted}
+
+    @router.delete("/api/v1/subscriptions")
+    def delete_all_subscriptions(subscriber_id: str = Query(min_length=1, max_length=128)):
+        return {"deleted": run_service(subscriptions.unsubscribe_all, subscriber_id)}
 
     return router

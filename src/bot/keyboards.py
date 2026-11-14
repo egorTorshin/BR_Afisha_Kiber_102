@@ -13,11 +13,6 @@ def language_keyboard() -> Dict[str, Any]:
     ]}
 
 
-def contact_keyboard(language: str = "ru") -> Dict[str, Any]:
-    return {"keyboard": [[{"text": t(language, "send_phone"), "request_contact": True}]], "resize_keyboard": True,
-            "one_time_keyboard": True}
-
-
 def location_keyboard(language: str = "ru") -> Dict[str, Any]:
     return {"keyboard": [[{"text": t(language, "send_location"), "request_location": True}]], "resize_keyboard": True,
             "one_time_keyboard": True}
@@ -28,16 +23,14 @@ def remove_reply_keyboard() -> Dict[str, Any]:
 
 
 def profile_keyboard(profile: Dict[str, Any]) -> Dict[str, Any]:
-    language = profile.get("language")
-    rows = [
-        [{"text": t(language, "edit_name"), "callback_data": "profile:edit:name"}, {"text": t(language, "edit_phone"), "callback_data": "profile:edit:phone"}],
-        [{"text": t(language, "edit_city"), "callback_data": "profile:edit:city"}, {"text": t(language, "favorites"), "callback_data": "profile:categories"}],
-        [{"text": t(language, "change_language"), "callback_data": "profile:language"}],
-        [{"text": t(language, "location"), "callback_data": "profile:location"}],
-        [{"text": t(language, "delete"), "callback_data": "profile:delete_confirm"}],
-        [{"text": t(language, "back"), "callback_data": "menu:main"}],
-    ]
-    return {"inline_keyboard": rows}
+    return {"inline_keyboard": [
+        [{"text": "🇷🇺 Русский", "callback_data": "profile_lang:ru"},
+         {"text": "🇧🇦 Башҡортса", "callback_data": "profile_lang:ba"},
+         {"text": "🇬🇧 English", "callback_data": "profile_lang:en"}],
+        [{"text": "📍 Геолокация (сортировка рядом)", "callback_data": "profile:location"},
+         {"text": "⭐ Любимые категории", "callback_data": "profile:categories"}],
+        [{"text": "⬅️ В главное меню", "callback_data": "menu:main"}],
+    ]}
 
 
 def delete_account_keyboard(language: str = "ru") -> Dict[str, Any]:
@@ -66,108 +59,47 @@ def profile_categories_keyboard(selected: List[str], language: str = "ru") -> Di
     return {"inline_keyboard": rows}
 
 
-def home_keyboard(language: str = "ru") -> Dict[str, Any]:
-    return {"inline_keyboard": [
-        [{"text": t(language, "profile"), "callback_data": "profile:open"}, {"text": t(language, "leisure"), "callback_data": "leisure:start"}],
-        [{"text": t(language, "location"), "callback_data": "profile:location"}],
-    ]}
-
-
-def leisure_categories_keyboard(selected: List[str], language: str = "ru") -> Dict[str, Any]:
-    cats = _category_rows(language)
-    rows = [[{"text": ("✅ " if code in selected else "") + label,
-              "callback_data": f"leisure:cat:{code}"}] for label, code in cats]
-    rows.append([{"text": t(language, "manual_type"), "callback_data": "leisure:category_manual"}])
-    rows.append([{"text": t(language, "done"), "callback_data": "leisure:categories_done"}])
-    return {"inline_keyboard": rows}
-
-
-def leisure_search_keyboard(filters: SearchFilters, language: str = "ru") -> Dict[str, Any]:
-    city = filters.city or t(language, "choose")
-    date = filters.date_from[:10] if filters.date_from else t(language, "choose")
-    categories = ", ".join(filters.categories) if filters.categories else t(language, "choose")
-    return {"inline_keyboard": [
-        [{"text": f"🏙 {t(language, 'city_label')}: {city}", "callback_data": "leisure:city_menu"}],
-        [{"text": f"📅 {t(language, 'date')}: {date}", "callback_data": "leisure:date_menu"}],
-        [{"text": f"🎭 {t(language, 'leisure_type')}: {categories}", "callback_data": "leisure:category_menu"}],
-        [{"text": t(language, "search"), "callback_data": "leisure:run"}],
-    ]}
-
-
-def leisure_cities_keyboard(language: str = "ru") -> Dict[str, Any]:
-    cities = ["Уфа", "Стерлитамак", "Салават", "Нефтекамск", "Октябрьский", "Сибай"]
-    rows = [[{"text": city, "callback_data": f"leisure:city:{city}"}] for city in cities]
-    rows.append([{"text": t(language, "manual_city"), "callback_data": "leisure:city_manual"}])
-    rows.append([{"text": t(language, "search_settings"), "callback_data": "leisure:form"}])
-    return {"inline_keyboard": rows}
-
-
-def leisure_dates_keyboard(language: str = "ru") -> Dict[str, Any]:
-    return {"inline_keyboard": [
-        [{"text": t(language, "today"), "callback_data": "leisure:date:today"}, {"text": t(language, "tomorrow"), "callback_data": "leisure:date:tomorrow"}],
-        [{"text": t(language, "weekend"), "callback_data": "leisure:date:weekend"}, {"text": t(language, "week"), "callback_data": "leisure:date:week"}],
-        [{"text": t(language, "manual_date"), "callback_data": "leisure:date_manual"}],
-        [{"text": t(language, "search_settings"), "callback_data": "leisure:form"}],
-    ]}
-
-
 def main_menu_keyboard(
     filters: Optional[SearchFilters] = None,
     matching_count: Optional[int] = None,
     subs_count: int = 0,
+    language: str = "ru",
 ) -> Dict[str, Any]:
-    f = filters or SearchFilters()
-    city_label = f"🏙 Город: {f.city} ✅" if f.city else "🏙 Выбрать город"
-    cat_label = f"🎭 {f.category.capitalize()} ✅" if f.category else "🎭 Категория"
+    return {"inline_keyboard": [
+        [{"text": f"🔎 Показать события ({matching_count})" if matching_count is not None else "🔎 Показать события",
+          "callback_data": "search:run"},
+         {"text": "⚙️ Фильтры", "callback_data": "menu:filters"}],
+        [{"text": f"🔔 Подписки ({subs_count})", "callback_data": "menu:subs"},
+         {"text": "🌐 Язык / 📍 Гео", "callback_data": "profile:open"}],
+    ]}
 
-    if f.date_preset:
-        date_label = f"📅 Период: {f.date_preset} ✅"
-    elif f.date_from:
-        date_label = f"📅 {f.date_from[:10]} ✅"
-    else:
-        date_label = "📅 Выбрать дату"
 
-    if f.is_free_only:
-        price_label = "💳 Бесплатно ✅"
-    elif f.max_price is not None:
-        price_label = f"💳 До {f.max_price} ₽ ✅"
-    else:
-        price_label = "💳 Любая цена"
-
-    age_label = f"👶 Возраст: до {f.max_age_limit}+ ✅" if f.max_age_limit is not None else "👶 Возраст (0+..18+)"
-    search_btn_text = (
-        f"🔎 Показать события ({matching_count})"
-        if matching_count is not None
-        else "🔎 Показать события"
-    )
-    subs_btn_text = f"🔔 Мои подписки ({subs_count})" if subs_count > 0 else "🔔 Мои подписки"
-
-    rows: List[List[Dict[str, str]]] = [
-        [{"text": search_btn_text, "callback_data": "search:run"}],
-        [
-            {"text": city_label, "callback_data": "menu:cities"},
-            {"text": cat_label, "callback_data": "menu:categories"},
-        ],
-        [
-            {"text": date_label, "callback_data": "menu:dates"},
-            {"text": price_label, "callback_data": "menu:prices"},
-        ],
-        [
-            {"text": age_label, "callback_data": "menu:ages"},
-            {"text": "🆓 Только бесплатные", "callback_data": "price:free"},
-        ],
-        [
-            {"text": "🔥 На выходных", "callback_data": "preset:weekend"},
-            {"text": "🧒 С детьми (0+/6+)", "callback_data": "preset:kids"},
-        ],
-        [
-            {"text": subs_btn_text, "callback_data": "menu:subs"},
-            {"text": "🔄 Сбросить фильтры", "callback_data": "menu:reset"},
-        ],
-        [
-            {"text": "ℹ️ Справка и примеры запросов", "callback_data": "menu:help"},
-        ],
+def filters_keyboard(filters: SearchFilters) -> Dict[str, Any]:
+    """Keep manual filters on one screen; every choice opens results immediately."""
+    rows = [
+        [{"text": "🏙 Город", "callback_data": "menu:cities"},
+         {"text": "🎭 Категория", "callback_data": "menu:categories"},
+         {"text": "📅 Дата", "callback_data": "menu:dates"}],
+        [{"text": "💳 Цена", "callback_data": "menu:prices"},
+         {"text": "👶 Возраст", "callback_data": "menu:ages"}],
+        [{"text": "🔥 Выходные", "callback_data": "preset:weekend"},
+         {"text": "🆓 Бесплатно", "callback_data": "price:free"},
+         {"text": "🧒 Детям", "callback_data": "preset:kids"}],
     ]
+    extras = (
+        ("query_text", "🔓 Убрать тему"),
+        ("time_after", "🔓 Время начала"),
+        ("time_before", "🔓 Время окончания"),
+        ("max_duration_min", "🔓 Длительность"),
+        ("language", "🔓 Язык события"),
+        ("venue", "🔓 Площадка"),
+    )
+    extra_buttons = [{"text": label, "callback_data": f"filter_clear:{field}"}
+                     for field, label in extras if getattr(filters, field) is not None]
+    rows.extend(extra_buttons[index:index + 2] for index in range(0, len(extra_buttons), 2))
+    rows.append([{"text": "🔎 Показать", "callback_data": "search:run"},
+                 *([{"text": "🔄 Сбросить", "callback_data": "menu:reset"}] if not filters.is_empty() else []),
+                 {"text": "🏠 Меню", "callback_data": "menu:main"}])
     return {"inline_keyboard": rows}
 
 
@@ -201,7 +133,7 @@ def cities_keyboard(
 
     all_prefix = "✅ " if not selected_city else "🌍 "
     rows.append([{"text": f"{all_prefix}Все города Башкортостана", "callback_data": "city:all"}])
-    rows.append([{"text": "⬅️ Назад в главное меню", "callback_data": "menu:main"}])
+    rows.append([{"text": "⬅️ К фильтрам", "callback_data": "menu:filters"}])
     return {"inline_keyboard": rows}
 
 
@@ -235,7 +167,7 @@ def categories_keyboard(
 
     all_prefix = "✅ " if not selected_category else "📋 "
     rows.append([{"text": f"{all_prefix}Все категории", "callback_data": "cat:all"}])
-    rows.append([{"text": "⬅️ Назад в главное меню", "callback_data": "menu:main"}])
+    rows.append([{"text": "⬅️ К фильтрам", "callback_data": "menu:filters"}])
     return {"inline_keyboard": rows}
 
 
@@ -259,7 +191,7 @@ def dates_keyboard(selected_preset: Optional[str] = None) -> Dict[str, Any]:
             ],
             [
                 {"text": "🗓 Любая дата", "callback_data": "date:all"},
-                {"text": "⬅️ Назад в меню", "callback_data": "menu:main"},
+                {"text": "⬅️ К фильтрам", "callback_data": "menu:filters"},
             ],
         ]
     }
@@ -279,7 +211,7 @@ def prices_keyboard(filters: Optional[SearchFilters] = None) -> Dict[str, Any]:
             ],
             [
                 {"text": "✅ Любая цена" if (not f.is_free_only and f.max_price is None) else "💳 Любая цена", "callback_data": "price:all"},
-                {"text": "⬅️ Назад в меню", "callback_data": "menu:main"},
+                {"text": "⬅️ К фильтрам", "callback_data": "menu:filters"},
             ],
         ]
     }
@@ -301,7 +233,7 @@ def ages_keyboard(selected_age: Optional[int] = None) -> Dict[str, Any]:
             ],
             [
                 {"text": mark("18+ (Без ограничений)", None), "callback_data": "age:all"},
-                {"text": "⬅️ Назад в меню", "callback_data": "menu:main"},
+                {"text": "⬅️ К фильтрам", "callback_data": "menu:filters"},
             ],
         ]
     }
@@ -317,7 +249,23 @@ def search_results_keyboard(
     rows: List[List[Dict[str, str]]] = []
 
     if total == 0:
-        return {"inline_keyboard": [[{"text": t(language, "new_search"), "callback_data": "leisure:start"}]]}
+        relax = []
+        if filters.date_preset or filters.date_from or filters.date_to:
+            relax.append({"text": "🔓 Любая дата", "callback_data": "date:all"})
+        if filters.is_free_only or filters.max_price is not None:
+            relax.append({"text": "🔓 Любая цена", "callback_data": "price:all"})
+        if relax:
+            rows.append(relax)
+        relax = []
+        if filters.category:
+            relax.append({"text": "🔓 Все категории", "callback_data": "cat:all"})
+        if filters.city:
+            relax.append({"text": "🌍 Все города РБ", "callback_data": "city:all"})
+        if relax:
+            rows.append(relax)
+        rows.append([{"text": "⚙️ Фильтры", "callback_data": "menu:filters"},
+                     {"text": "🏠 Меню", "callback_data": "menu:main"}])
+        return {"inline_keyboard": rows}
 
     # Кнопки быстрого перехода к карточке каждого события (не более 3 действий до карточки!)
     for idx, ev in enumerate(events, start=filters.offset + 1):
@@ -341,19 +289,22 @@ def search_results_keyboard(
     if nav_row:
         rows.append(nav_row)
 
-    rows.append([{"text": t(language, "new_search"), "callback_data": "leisure:start"}])
+    sub_city = filters.city or "Все города"
+    sub_cat = filters.category or "Все категории"
+    rows.append([{"text": "⚙️ Фильтры", "callback_data": "menu:filters"},
+                 {"text": "🔕 Отписаться" if is_subscribed else "🔔 Подписаться",
+                  "callback_data": f"sub_toggle:{sub_city}:{sub_cat}"},
+                 {"text": "🏠 Меню", "callback_data": "menu:main"}])
     return {"inline_keyboard": rows}
 
 
-def agent_results_keyboard(cards: List[AgentEventCard]) -> Dict[str, Any]:
+def agent_results_keyboard(cards: List[AgentEventCard], show_filters: bool = False) -> Dict[str, Any]:
     rows: List[List[Dict[str, str]]] = []
     for idx, card in enumerate(cards, start=1):
         title = card.title if len(card.title) <= 34 else card.title[:31] + "..."
         rows.append([{"text": f"📌 {idx}. {title}", "callback_data": f"card:{card.id}"}])
-    rows.append([
-        {"text": "🔎 Новый запрос", "callback_data": "menu:main"},
-        {"text": "🏠 Главное меню", "callback_data": "menu:main"},
-    ])
+    rows.append(([{"text": "⚙️ Изменить фильтры", "callback_data": "menu:filters"}] if show_filters else []) +
+                [{"text": "🏠 Меню", "callback_data": "menu:main"}])
     return {"inline_keyboard": rows}
 
 
@@ -368,9 +319,10 @@ def event_card_keyboard(ev: EventRecord, is_subscribed: bool = False, language: 
     if ev.source_url and (ev.source_url.startswith("http://") or ev.source_url.startswith("https://")):
         rows.append([{"text": t(language, "source"), "url": ev.source_url}])
 
-    rows.append([
-        {"text": t(language, "back_list"), "callback_data": "search:run"},
-    ])
+    rows.append([{"text": "🔕 Отписаться" if is_subscribed else "🔔 Подписаться",
+                  "callback_data": f"sub_toggle:{ev.city}:{ev.category}"}])
+    rows.append([{"text": "⬅️ К списку", "callback_data": "search:run"},
+                 {"text": "🏠 Меню", "callback_data": "menu:main"}])
     return {"inline_keyboard": rows}
 
 

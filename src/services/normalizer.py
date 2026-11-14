@@ -423,7 +423,7 @@ def parse_free_text_query(text: str, ref_date: date, db: Optional[Database] = No
         filters.date_to = f"{target_d.isoformat()}T23:59:59"
     else:
         date_patterns = [
-            (r"\b(в\s+эти\s+выходные|на\s+выходных|в\s+выходные|выходные)\b", "weekend"),
+            (r"\b(в\s+эти\s+выходные|на\s+этих\s+выходных|на\s+выходных|в\s+выходные|выходные)\b", "weekend"),
             (r"\b(на\s+следующей\s+неделе)\b", "next_week"),
             (r"\b(на\s+этой\s+неделе|на\s+неделе)\b", "week"),
             (r"\b(до\s+конца\s+месяца|в\s+этом\s+месяце)\b", "month"),

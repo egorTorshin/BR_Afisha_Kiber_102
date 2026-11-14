@@ -13,6 +13,13 @@ class FeedbackInput(BaseModel):
     message: str = Field(min_length=1, max_length=10000)
 
 
+class SubscriptionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subscriber_id: str = Field(min_length=1, max_length=128)
+    city: str = Field(min_length=1, max_length=120)
+    category: str = Field(min_length=1, max_length=100)
+
+
 class LoginInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=1, max_length=100)

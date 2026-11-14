@@ -130,6 +130,23 @@ def test_openapi_and_docs(client):
     assert {'page','page_size','sort'} <= {p['name'] for p in paths['/api/v1/events']['get']['parameters']}
 
 
+def test_versioned_feedback_and_subscriptions(client, catalog):
+    feedback = client.post('/api/v1/feedback', json={'event_id': catalog['free'].id, 'message': 'Проверьте дату'})
+    assert feedback.status_code == 201
+    assert feedback.json()['event_id'] == catalog['free'].id
+    payload = {'subscriber_id': 'browser-test', 'city': 'Уфа', 'category': 'концерт'}
+    created = client.post('/api/v1/subscriptions', json=payload)
+    assert created.status_code == 201
+    sub_id = created.json()['id']
+    listed = client.get('/api/v1/subscriptions', params={'subscriber_id': 'browser-test'})
+    assert listed.status_code == 200 and [s['id'] for s in listed.json()] == [sub_id]
+    assert client.delete(f'/api/v1/subscriptions/{sub_id}', params={'subscriber_id': 'someone-else'}).status_code == 404
+    assert client.delete(f'/api/v1/subscriptions/{sub_id}', params={'subscriber_id': 'browser-test'}).json() == {'deleted': 1}
+    client.post('/api/v1/subscriptions', json=payload)
+    assert client.delete('/api/v1/subscriptions', params={'subscriber_id': 'browser-test'}).json() == {'deleted': 1}
+    assert client.get('/api/v1/subscriptions', params={'subscriber_id': 'browser-test'}).json() == []
+
+
 def test_price_sort_is_independent_of_date(client, db, catalog):
     db.execute('UPDATE events SET date_start = ? WHERE id = ?', ('2026-11-18T10:00:00', catalog['unknown'].id))
     db.execute('UPDATE events SET date_start = ? WHERE id = ?', ('2026-11-19T10:00:00', catalog['paid'].id))

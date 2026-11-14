@@ -94,11 +94,12 @@ def test_chat_persists_state_trace_and_server_side_session(tmp_path, monkeypatch
         trace = SqlAgentTraceRepository(db).get(body["request_id"])
         assert trace.conversation_id == body["conversation_id"]
         assert trace.cost is not None
-        assert trace.tool_calls[0].arguments == {"redacted_fields": ["city"], "other_fields_count": 0}
+        assert trace.tool_calls[0].arguments == {"city": "Уфа"}
+        assert trace.user_query == "Концерты в Уфе"
         raw = db.fetchone(
             "SELECT trace_json FROM agent_traces WHERE request_id = ?", (body["request_id"],)
         )["trace_json"]
-        assert "Концерты в Уфе" not in raw
+        assert "Концерты в Уфе" in raw
         assert cookie not in raw
 
         assert client.get(f"/api/v1/admin/agent/traces/{body['request_id']}").status_code == 401

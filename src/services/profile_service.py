@@ -30,13 +30,13 @@ class ProfileService:
         now = self._now()
         self.db.execute(
             """INSERT INTO bot_profiles (user_id, language, onboarding_state, created_at, updated_at)
-               VALUES (?, ?, 'name', ?, ?)""",
+               VALUES (?, ?, 'complete', ?, ?)""",
             (str(user_id), language, now, now),
         )
         return self.get(user_id) or {}
 
     def update(self, user_id: str, **values: Any) -> dict[str, Any]:
-        allowed = {"language", "name", "phone", "city", "latitude", "longitude", "onboarding_state"}
+        allowed = {"language", "name", "city", "latitude", "longitude"}
         fields, params = [], []
         for key, value in values.items():
             if key in allowed:

@@ -42,6 +42,9 @@ class PeriodInput(ContractModel):
 class SearchEventsInput(PeriodInput):
     city: StrictStr | None = Field(default=None, min_length=1, max_length=120)
     category: StrictStr | None = Field(default=None, min_length=1, max_length=120)
+    time_after: StrictStr | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    time_before: StrictStr | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    max_duration_min: StrictInt | None = Field(default=None, ge=1, le=1440)
     max_price: StrictInt | None = Field(default=None, ge=0, le=1_000_000_000)
     is_free_only: StrictBool = False
     max_age_limit: StrictInt | None = Field(default=None, ge=0, le=18)
@@ -281,6 +284,8 @@ def create_tool_registry(
     def search_events(args: SearchEventsInput) -> SearchEventsOutput:
         events, total, explanation = search.search(SearchFilters(
             query_text=args.text, city=args.city, category=args.category,
+            time_after=args.time_after, time_before=args.time_before,
+            max_duration_min=args.max_duration_min,
             max_price=args.max_price, is_free_only=args.is_free_only,
             max_age_limit=args.max_age_limit, limit=args.limit, offset=args.offset,
             **args.search_dates(),
@@ -341,7 +346,7 @@ def create_tool_registry(
                                   status=record.status, created_at=record.created_at)
 
     changing = ToolMetadata(state_changing=True, requires_confirmation=True)
-    return ToolRegistry([
+    registry = ToolRegistry([
         ToolDefinition("search_events", SearchEventsInput, SearchEventsOutput, search_events),
         ToolDefinition("get_event", GetEventInput, GetEventOutput, get_event),
         ToolDefinition("find_similar", FindSimilarInput, FindSimilarOutput, find_similar),
@@ -349,4 +354,6 @@ def create_tool_registry(
         ToolDefinition("subscribe", SubscribeInput, SubscribeOutput, subscribe, changing),
         ToolDefinition("save_feedback", SaveFeedbackInput, SaveFeedbackOutput, save_feedback, changing),
     ], limits=limits)
+    registry.db = search.db
+    return registry
 

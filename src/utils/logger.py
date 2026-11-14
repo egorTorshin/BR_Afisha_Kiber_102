@@ -13,6 +13,7 @@ request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("request_id
 # Регулярные выражения для маскирования случайных телефонов/email/токенов в логах (Раздел 6.1, 10)
 PHONE_RE = re.compile(r"(\+?7|8)[\s\-\(]*\d{3}[\s\-\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}")
 EMAIL_RE = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
+SECRET_RE = re.compile(r"(?i)\b(?:sensitive_token|api_key|secret|token)[_:= -]*[A-Za-z0-9_-]{3,}\b")
 
 
 def new_request_id() -> str:
@@ -37,6 +38,7 @@ def scrub_pii(text: str) -> str:
         return text
     text = PHONE_RE.sub("[REDACTED_PHONE]", text)
     text = EMAIL_RE.sub("[REDACTED_EMAIL]", text)
+    text = SECRET_RE.sub("[REDACTED_SECRET]", text)
     return text
 
 

@@ -216,7 +216,12 @@ def format_event_card(ev: EventRecord, language: str = "ru") -> str:
 
     if ev.org_link:
         lines.append(f"🎟 <b>{tickets_l}:</b> {html.escape(ev.org_link)}")
-    lines.append(f"🔗 <b>{source_l}:</b> {html.escape(ev.source_url)}")
+    sources = ev.sources or []
+    if sources:
+        for source in sources:
+            lines.append(f"🔗 <b>{source_l}:</b> {html.escape(source.source_type)} — {html.escape(source.source_url)}")
+    else:
+        lines.append(f"🔗 <b>{source_l}:</b> {html.escape(ev.source_url)}")
 
     if ev.is_disputed and ev.dispute_reason:
         lines.append(f"\n🔎 <i>Отметка модерации: {html.escape(ev.dispute_reason)}</i>")

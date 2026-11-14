@@ -18,6 +18,8 @@ class AgentTrace(ContractModel):
     trace_id: str = Field(min_length=1)
     request_id: str | None = None
     conversation_id: str | None = None
+    user_query: str | None = None
+    plan_summary: str | None = None
     routing_features: RoutingFeatures
     model_route: ModelRoute
     model_name: str = Field(min_length=1)

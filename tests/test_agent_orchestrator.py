@@ -113,6 +113,10 @@ def test_simple_jev_light_search_cards_and_trace():
     assert response.event_cards[0].org_link == "https://example.org/tickets"
     assert trace.router_decision.route == ModelRoute.LIGHT
     assert trace.selected_models == ["light-test"]
+    assert trace.tool_calls[0].arguments["city"] == "Уфа"
+    assert trace.user_query == "Концерты в Уфе"
+    assert "search_events" in trace.plan_summary
+    assert "город Уфа" in response.message
     assert state.active_constraints.city == "Уфа" and len(state.turns) == 2
 
 
@@ -123,6 +127,17 @@ def test_heavy_multiple_tools_and_grounding():
     assert response.result_ids == ["e2"] and len(seen) == 2
     assert trace.basis_event_ids == ["e2"] and trace.number_of_steps == 3
     assert state.active_constraints.max_price == 100
+    assert response.message == "Готово"
+    assert trace.tool_calls[-1].arguments["max_price"] == 100
+
+
+def test_agent_limits_cards_and_advances_visible_offset():
+    records = [event(f"e{index}") for index in range(8)]
+    agent, _, _ = setup(lights=[light(args={"city": "Уфа"}, constraints=ConstraintSet(city="Уфа"))], records=records)
+    response, trace, state = run(agent, "Концерты в Уфе")
+    assert len(response.event_cards) == 5
+    assert state.next_search_offset == 5
+    assert len(trace.result_ids) == 5
 
 
 def test_light_escalation_in_same_request():

@@ -199,6 +199,7 @@ class HeavyDecision(ContractModel):
     security_flags: SecurityFlags = Field(default_factory=SecurityFlags)
     policy_decision: PolicyDecision = PolicyDecision.ALLOWED
     pending_confirmation: ToolCall | None = None
+    last_search_explanation: str | None = None
 
     @property
     def basis_event_ids(self) -> list[str]:
@@ -227,6 +228,7 @@ class HeavyLLMProvider:
         approvals = list(confirmed_calls or [])
         steps = input_tokens = output_tokens = 0
         repairs = max_context_tokens = 0
+        last_search_explanation: str | None = None
 
         def done(result: HeavyFinal | HeavyFallback, reason: str) -> HeavyDecision:
             return HeavyDecision(result=result, model_name=model or "unconfigured",
@@ -235,6 +237,7 @@ class HeavyLLMProvider:
                                  steps=steps, repair_attempts=repairs,
                                  max_context_tokens=max_context_tokens,
                                  tool_calls=calls, tool_result_ids=result_ids,
+                                 last_search_explanation=last_search_explanation,
                                  stop_reason=reason, security_events=context.security_events,
                                  security_flags=context.security_flags,
                                  pending_confirmation=pending,
@@ -254,12 +257,16 @@ class HeavyLLMProvider:
                 or self.settings.heavy_timeout_seconds <= 0):
             return done(fallback, "configuration_error")
         features = RoutingFeatureExtractor().extract(message, state, context.security_flags)
-        parsed_filters = parse_free_text_query(message, today or date.today())
+        parsed_filters = parse_free_text_query(message, ref_date=today or self.settings.get_reference_date(),
+                                               db=getattr(self.registry, "db", None))
         normalized_search = {
             "city": parsed_filters.city,
             "category": parsed_filters.category,
             "date_from": parsed_filters.date_from[:10] if parsed_filters.date_from else None,
             "date_to": parsed_filters.date_to[:10] if parsed_filters.date_to else None,
+            "time_after": parsed_filters.time_after,
+            "time_before": parsed_filters.time_before,
+            "max_duration_min": parsed_filters.max_duration_min,
             "max_price": parsed_filters.max_price,
             "is_free_only": True if parsed_filters.is_free_only else None,
             "max_age_limit": parsed_filters.max_age_limit,
@@ -287,7 +294,7 @@ class HeavyLLMProvider:
             nonlocal candidates
             dialogue = [] if repair_error else relevant_turns
             payload = {
-                "current_date": (today or date.today()).isoformat(),
+                "current_date": (today or self.settings.get_reference_date()).isoformat(),
                 "constraint_set": state.active_constraints.model_dump(mode="json", exclude_none=True),
                 "dialogue": dialogue,
                 "request": message,
@@ -406,6 +413,8 @@ class HeavyLLMProvider:
                             approvals.pop(index)
                             break
                 result = self.registry.execute(proposed.name, arguments, context=context, confirmed=approved)
+                if proposed.name == "search_events" and isinstance(result.payload, dict):
+                    last_search_explanation = result.payload.get("explanation")
                 result_ids.append(result.result_ids)
                 if result.error and result.error.code == "confirmation_required" and stop_on_confirmation:
                     decision, parsed = self.registry.policy.check_tool(

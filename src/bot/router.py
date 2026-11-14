@@ -2,9 +2,11 @@ import html
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+from src.agent.schemas import ConstraintSet
 from src.bot.formatter import (
     format_agent_response,
     format_event_card,
+    format_filter_summary_block,
     format_help_message,
     format_import_report,
     format_search_results,
@@ -21,17 +23,11 @@ from src.bot.keyboards import (
     dates_keyboard,
     delete_account_keyboard,
     event_card_keyboard,
+    filters_keyboard,
     main_menu_keyboard,
     prices_keyboard,
     search_results_keyboard,
     subscriptions_keyboard,
-    contact_keyboard,
-    home_keyboard,
-    language_keyboard,
-    leisure_categories_keyboard,
-    leisure_search_keyboard,
-    leisure_cities_keyboard,
-    leisure_dates_keyboard,
     location_keyboard,
     profile_categories_keyboard,
     profile_keyboard,
@@ -43,12 +39,12 @@ from src.db.connection import Database
 from src.models.schemas import SearchFilters
 from src.services.import_service import ImportService
 from src.services.agent_service import AgentService
-from src.services.normalizer import parse_free_text_query, parse_iso_datetime, resolve_date_preset, resolve_city, resolve_category
+from src.services.normalizer import normalize_text, parse_free_text_query, parse_iso_datetime, resolve_date_preset, resolve_city, resolve_category
 from src.services.search_service import SearchService
 from src.services.subscription_service import SubscriptionService
 from src.services.profile_service import ProfileService
 from src.services.user_service import UserService
-from src.utils.logger import get_logger, log_event, new_request_id
+from src.utils.logger import get_logger, log_event, new_request_id, scrub_pii
 from src.utils.rate_limiter import RateLimiter
 
 
@@ -79,8 +75,8 @@ class BotRouter:
 
         self._user_filters: Dict[str, SearchFilters] = {}
         self._awaiting_custom_date: Dict[str, bool] = {}
-        self._awaiting_profile_field: Dict[str, str] = {}
-        self._leisure_wizard: Dict[str, str] = {}
+        self._agent_conversations: Dict[str, str] = {}
+        self._manually_edited_filters: set[str] = set()
 
     def get_user_filters(self, user_id: str) -> SearchFilters:
         uid = str(user_id)
@@ -92,6 +88,8 @@ class BotRouter:
         uid = str(user_id)
         self._user_filters[uid] = SearchFilters()
         self._awaiting_custom_date.pop(uid, None)
+        if uid in self._agent_conversations:
+            self._manually_edited_filters.add(uid)
         return self._user_filters[uid]
 
     def is_admin(self, user_id: str) -> bool:
@@ -107,32 +105,26 @@ class BotRouter:
         return text == command or text.startswith(command + " ")
 
     def _build_main_menu_response(self, uid: str, prefix_notice: Optional[str] = None) -> BotResponse:
-        profile = self.profile_service.get(uid)
-        if profile and profile.get("onboarding_state") == "complete":
-            name = html.escape(profile.get("name") or "")
-            greeting = t(profile.get("language"), "greeting")
-            if name:
-                greeting = f"{greeting}\n\nРада вас видеть, <b>{name}</b>!"
-            if prefix_notice:
-                greeting = f"{prefix_notice}\n\n{greeting}"
-            return BotResponse(text=greeting, reply_markup=home_keyboard(profile.get("language", "ru")))
-        if not profile:
-            return BotResponse(text="<b>Выберите язык / Телде һайлағыҙ / Choose language</b>", reply_markup=language_keyboard())
-        return BotResponse(text="Продолжите регистрацию через /start.")
+        filters = self.get_user_filters(uid)
+        cnt = self.search_service.count_matching(filters)
+        subs_cnt = len(self.sub_service.list_subscriptions(uid))
+        welcome = format_welcome_message(filters, matching_count=cnt)
+        return BotResponse(text=(f"{prefix_notice}\n\n" if prefix_notice else "") + welcome,
+                           reply_markup=main_menu_keyboard(filters, matching_count=cnt, subs_count=subs_cnt, language=self._language(uid)))
 
     def _execute_search_response(self, user_id: str) -> BotResponse:
         uid = str(user_id)
         filters = self.get_user_filters(uid)
         profile = self.profile_service.get(uid)
         language = self._language(uid)
-        if profile and profile.get("onboarding_state") == "complete":
+        if profile:
             events, total, explanation = self.search_service.search_for_profile(
                 filters, profile.get("latitude"), profile.get("longitude"), profile.get("favorite_categories"),
             )
         else:
             events, total, explanation = self.search_service.search(filters)
         is_sub = self.sub_service.is_subscribed(uid, filters.city, filters.category)
-        if total == 0 and profile and profile.get("onboarding_state") == "complete":
+        if total == 0 and profile:
             recommendation_kind, alternatives = self.search_service.recommend_alternatives(
                 filters, self.settings.get_reference_date()
             )
@@ -163,7 +155,8 @@ class BotRouter:
                 keyboard = {"inline_keyboard": [
                     [{"text": f"📌 {event.title[:34]}", "callback_data": f"card:{event.id}"}]
                     for event in alternatives
-                ] + [[{"text": t(language, "new_search"), "callback_data": "leisure:start"}]]}
+                ] + [[{"text": "⚙️ Фильтры", "callback_data": "menu:filters"},
+                     {"text": "🏠 Меню", "callback_data": "menu:main"}]]}
                 return BotResponse(text="\n".join(lines), reply_markup=keyboard)
         text = format_search_results(
             events, total, filters,
@@ -173,6 +166,67 @@ class BotRouter:
         kb = search_results_keyboard(events, total, filters, is_subscribed=is_sub, language=language)
         return BotResponse(text=text, reply_markup=kb)
 
+    def _remember_agent_search_filters(self, uid: str, text: str, tool_calls: list) -> bool:
+        """Mirror the last executed catalog search into the bot's editable filters."""
+        search_calls = [call for call in tool_calls if call.name in {"search_events", "get_venue_schedule"}]
+        if not search_calls:
+            return False
+        args = search_calls[-1].arguments
+        filters = SearchFilters()
+        for field in ("city", "category", "venue", "time_after", "time_before", "max_duration_min",
+                      "max_price", "is_free_only", "max_age_limit"):
+            if field in args:
+                setattr(filters, field, args[field])
+        for field, suffix in (("date_from", "T00:00:00"), ("date_to", "T23:59:59")):
+            value = args.get(field)
+            if value:
+                day = str(value)[:10]
+                setattr(filters, field, day + suffix)
+        try:
+            parsed = parse_free_text_query(text, ref_date=self.settings.get_reference_date(), db=self.db)
+        except ValueError:
+            parsed = SearchFilters()
+        if (parsed.date_preset and parsed.date_from == filters.date_from
+                and parsed.date_to == filters.date_to):
+            filters.date_preset = parsed.date_preset
+        tool_text = str(args.get("text") or "")
+        if tool_text:
+            # A model may forward the whole question. Keep only its remaining
+            # search terms so changing the city or date does not retain old ones.
+            filters.query_text = (parsed.query_text if normalize_text(tool_text) == normalize_text(text)
+                                  else scrub_pii(tool_text)[:200])
+        self._user_filters[uid] = filters
+        self._manually_edited_filters.discard(uid)
+        return True
+
+    def _sync_manual_filters_to_agent(self, uid: str, conversation_id: str) -> None:
+        if uid not in self._manually_edited_filters:
+            return
+        state = self.agent_service.dialogue_repo.get(conversation_id)
+        if state is None:
+            self._manually_edited_filters.discard(uid)
+            return
+        filters = self.get_user_filters(uid)
+        values = {}
+        for field in ConstraintSet.model_fields:
+            value = getattr(filters, field, None)
+            if value is not None:
+                values[field] = value[:10] if field in {"date_from", "date_to"} else value
+        state.active_constraints = ConstraintSet.model_validate(values)
+        state.pending_confirmation = None
+        state.pending_clarification = None
+        state.last_result_ids = []
+        state.shown_event_ids = []
+        state.has_previous_results = False
+        state.next_search_offset = 0
+        self.agent_service.dialogue_repo.save(state)
+        self._manually_edited_filters.discard(uid)
+
+    def _search_after_filter_change(self, uid: str) -> BotResponse:
+        if uid in self._agent_conversations:
+            self._manually_edited_filters.add(uid)
+        return self._execute_search_response(uid)
+
     def _handle_agent_query(self, uid: str, text: str) -> BotResponse:
         """Run a free-form query through the shared agent service.
 
@@ -180,25 +234,45 @@ class BotRouter:
         presentation fallback, while the same request is still persisted and
         traced by the agent pipeline.
         """
-        _, conversation_id = self.agent_service.get_or_create_principal(f"telegram:{uid}")
-        result = self.agent_service.chat(
-            text,
-            conversation_id,
-            user_id=f"telegram:{uid}",
-        )
-        if self.settings.ai_mode == "no-ai" and result.status in {"ok", "fallback", "no_data"}:
+        try:
+            _, conversation_id = self.agent_service.get_or_create_principal(f"telegram:{uid}")
+            self._sync_manual_filters_to_agent(uid, conversation_id)
+            result = self.agent_service.chat(
+                text,
+                conversation_id,
+                user_id=f"telegram:{uid}",
+            )
+            self._agent_conversations[uid] = conversation_id
+        except Exception as exc:
+            if self.settings.ai_mode != "no-ai":
+                raise
+            # In no-ai mode search must remain usable if agent persistence is unavailable.
+            log_event(self.logger, logging.ERROR, "Agent persistence unavailable; using catalog search",
+                      user_id=uid, error_type=type(exc).__name__)
+            result = None
+        if self.settings.ai_mode == "no-ai" and (result is None or result.status in {"ok", "fallback", "no_data"}):
             parsed_filters = parse_free_text_query(
                 text,
                 ref_date=self.settings.get_reference_date(),
                 db=self.db,
             )
             if parsed_filters.is_empty():
-                parsed_filters.query_text = text
+                parsed_filters.query_text = scrub_pii(text)[:200]
+            elif parsed_filters.query_text:
+                parsed_filters.query_text = scrub_pii(parsed_filters.query_text)[:200]
             self._user_filters[uid] = parsed_filters
             return self._execute_search_response(uid)
+        remembered = False
+        if result.status in {"ok", "fallback", "no_data"}:
+            trace = self.agent_service.get_trace(result.request_id)
+            if trace:
+                remembered = self._remember_agent_search_filters(uid, text, trace.tool_calls)
+        filters = self.get_user_filters(uid)
+        filters_note = ("\n\n⚙️ <b>Фильтры:</b> " + html.escape(filters.describe_human())
+                        if remembered and not filters.is_empty() else "")
         return BotResponse(
-            text=format_agent_response(result.response.message, result.response.event_cards),
-            reply_markup=agent_results_keyboard(result.response.event_cards),
+            text=format_agent_response(result.response.message, result.response.event_cards) + filters_note,
+            reply_markup=agent_results_keyboard(result.response.event_cards, show_filters=bool(filters_note)),
         )
 
     def handle_message(self, user_id: str, text: str) -> BotResponse:
@@ -234,78 +308,28 @@ class BotRouter:
                     ev_id = parts[1][len("event_"):]
                     return self._open_card(uid, ev_id)
                 self.reset_user_filters(uid)
-                profile = self.profile_service.get(uid)
-                if not profile:
-                    return BotResponse(
-                        text=("<b>Доброго времени суток!</b> Я помогу подобрать досуг с учётом ваших "
-                              "интересов, расписания и компании.\n\n"
-                              "<b>Выберите язык / Телде һайлағыҙ / Choose language</b>"),
-                        reply_markup=language_keyboard(),
-                    )
-                if profile.get("onboarding_state") != "complete":
-                    prompts = {key: t(profile.get("language"), key) for key in ("name", "phone", "city")}
-                    state = profile.get("onboarding_state", "name")
-                    markup = contact_keyboard(profile.get("language", "ru")) if state == "phone" else (
-                        {"inline_keyboard": [[{"text": t(profile.get("language"), "skip"), "callback_data": "onboarding:skip_city"}]]}
-                        if state == "city" else None
-                    )
-                    return BotResponse(text=prompts.get(state, prompts["name"]), reply_markup=markup)
                 return self._build_main_menu_response(uid)
 
+            if self._is_command(clean_text, "/search"):
+                return self._execute_search_response(uid)
+            if self._is_command(clean_text, "/help"):
+                filters = self.get_user_filters(uid)
+                return BotResponse(text=format_help_message(), reply_markup=main_menu_keyboard(
+                    filters, self.search_service.count_matching(filters),
+                    len(self.sub_service.list_subscriptions(uid)), self._language(uid)))
+            if self._is_command(clean_text, "/cancel") or self._is_command(clean_text, "/reset"):
+                self.reset_user_filters(uid)
+                return self._build_main_menu_response(uid, "🔄 <b>Фильтры поиска сброшены.</b>")
+            if self._is_command(clean_text, "/unsubscribe"):
+                removed = self.sub_service.unsubscribe_all(uid)
+                return self._build_main_menu_response(uid, f"✅ <b>Вы отписаны от всех уведомлений</b> (удалено подписок: {removed}).")
+            if self._is_command(clean_text, "/subscriptions"):
+                subs = self.sub_service.list_subscriptions(uid)
+                return BotResponse(text=format_subscriptions_list(subs), reply_markup=subscriptions_keyboard(subs))
             if clean_text.startswith('/event_'):
-                return self._open_card(uid, clean_text[len('/event_'):])
-
-            if clean_text.startswith("/"):
-                return self._build_main_menu_response(
-                    uid, prefix_notice="Доступна только команда /start. Остальные действия выполняются кнопками."
-                )
-
-            profile = self.profile_service.get(uid)
-            if profile and profile.get("onboarding_state") != "complete":
-                return self._handle_profile_text(uid, clean_text, profile)
-            field = self._awaiting_profile_field.pop(uid, None)
-            if field:
-                return self._save_profile_field(uid, field, clean_text)
-
-            if self._leisure_wizard.get(uid) == "city":
-                city = resolve_city(clean_text, db=self.db)
-                if not city:
-                    return BotResponse(text="Не удалось распознать город. Напишите, например: Уфа, Салават или Стерлитамак.")
-                filters = self.get_user_filters(uid)
-                filters.city = city
-                self._leisure_wizard[uid] = "date"
-                return BotResponse(text="📅 <b>На какую дату ищем досуг?</b> Введите ДД.ММ.ГГГГ, например <code>15.11.2026</code>.")
-
-            if self._leisure_wizard.get(uid) == "city_manual":
-                city = resolve_city(clean_text, db=self.db)
-                if not city:
-                    return BotResponse(text="Не удалось распознать город. Проверьте написание или выберите вариант кнопкой.", reply_markup=leisure_cities_keyboard())
-                self.get_user_filters(uid).city = city
-                self._leisure_wizard[uid] = "form"
-                return self._leisure_form_response(uid)
-
-            if self._leisure_wizard.get(uid) == "date":
-                return self._handle_custom_date_input(uid, clean_text)
-
-            if self._leisure_wizard.get(uid) == "date_manual":
-                try:
-                    iso_dt = parse_iso_datetime(clean_text if len(clean_text) != 5 else f"{clean_text}.{self.settings.get_reference_date().year}")
-                except ValueError:
-                    return BotResponse(text="Введите дату в формате ДД.ММ.ГГГГ, например 15.11.2026.")
-                filters = self.get_user_filters(uid)
-                filters.date_from, filters.date_to = f"{iso_dt[:10]}T00:00:00", f"{iso_dt[:10]}T23:59:59"
-                self._leisure_wizard[uid] = "form"
-                return self._leisure_form_response(uid)
-
-            if self._leisure_wizard.get(uid) == "category_manual":
-                category = resolve_category(clean_text, db=self.db)
-                if not category:
-                    return BotResponse(text="Такой вид досуга не найден. Выберите вариант кнопкой или уточните название.", reply_markup=leisure_categories_keyboard(self.get_user_filters(uid).categories))
-                filters = self.get_user_filters(uid)
-                if category not in filters.categories:
-                    filters.categories.append(category)
-                self._leisure_wizard[uid] = "form"
-                return self._leisure_form_response(uid)
+                return self._open_card(uid, clean_text[len('/event_'):].split()[0])
+            if self._is_command(clean_text, "/admin") or clean_text.startswith("/admin_"):
+                return self._handle_admin_command(uid, clean_text)
 
             # 2. Если пользователь вводит выбранную дату после нажатия кнопки «Указать дату»
             if self._awaiting_custom_date.get(uid):
@@ -319,7 +343,7 @@ class BotRouter:
             log_event(self.logger, logging.ERROR, "Error handling message", user_id=uid, error_type=type(exc).__name__)
             return self._build_main_menu_response(
                 uid,
-                prefix_notice="⚠️ Не удалось разобрать запрос. Пожалуйста, уточните формулировку или выберите фильтр кнопками:",
+                prefix_notice="⚠️ Поиск временно недоступен. Попробуйте повторить запрос чуть позже.",
             )
 
     def _handle_custom_date_input(self, uid: str, raw_date: str) -> BotResponse:
@@ -335,10 +359,7 @@ class BotRouter:
             filters.date_from = f"{day_str}T00:00:00"
             filters.date_to = f"{day_str}T23:59:59"
             filters.offset = 0
-            if self._leisure_wizard.get(uid) == "date":
-                self._leisure_wizard[uid] = "category"
-                return BotResponse(text="🎭 <b>Выберите интересующие виды досуга:</b>", reply_markup=leisure_categories_keyboard([]))
-            return self._execute_search_response(uid)
+            return self._search_after_filter_change(uid)
         except ValueError:
             return BotResponse(
                 text=(
@@ -349,79 +370,15 @@ class BotRouter:
                 reply_markup=dates_keyboard(self.get_user_filters(uid).date_preset),
             )
 
-    def _leisure_form_response(self, uid: str, notice: str = "") -> BotResponse:
-        language = self._language(uid)
-        text = t(language, "form_title")
-        if notice:
-            text = f"{notice}\n\n{text}"
-        return BotResponse(text=text, reply_markup=leisure_search_keyboard(self.get_user_filters(uid), language))
-
-    def _handle_profile_text(self, uid: str, text: str, profile: Dict[str, Any]) -> BotResponse:
-        state = profile.get("onboarding_state")
-        language = profile.get("language", "ru")
-        if state == "name":
-            if len(text) < 2 or len(text) > 80:
-                return BotResponse(text="Введите имя от 2 до 80 символов.")
-            self.profile_service.update(uid, name=text, onboarding_state="phone")
-            return BotResponse(text=t(language, "phone"), reply_markup=contact_keyboard(language))
-        if state == "phone":
-            digits = "".join(char for char in text if char.isdigit())
-            if len(digits) < 10 or len(digits) > 15:
-                return BotResponse(text="Пожалуйста, отправьте номер кнопкой или введите корректный номер.", reply_markup=contact_keyboard())
-            self.profile_service.update(uid, phone=text, onboarding_state="city")
-            return BotResponse(text=t(language, "city"), reply_markup={"inline_keyboard": [[{"text": t(language, "skip"), "callback_data": "onboarding:skip_city"}]]})
-        if state == "city":
-            city = resolve_city(text, db=self.db)
-            if not city:
-                return BotResponse(text="Не нашла такой город в каталоге. Проверьте написание или нажмите «Пропустить».", reply_markup={"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]})
-            self.profile_service.update(uid, city=city, onboarding_state="complete")
-            return self._build_main_menu_response(uid, t(language, "registered"))
-        return self._build_main_menu_response(uid)
-
-    def _save_profile_field(self, uid: str, field: str, text: str) -> BotResponse:
-        language = self._language(uid)
-        if field == "phone":
-            digits = "".join(char for char in text if char.isdigit())
-            if len(digits) < 10 or len(digits) > 15:
-                self._awaiting_profile_field[uid] = field
-                return BotResponse(text="Введите корректный номер или отправьте контакт кнопкой.", reply_markup=contact_keyboard())
-        if field == "city":
-            city = resolve_city(text, db=self.db)
-            if not city:
-                self._awaiting_profile_field[uid] = field
-                return BotResponse(text="Не нашла такой город в каталоге. Проверьте написание и попробуйте ещё раз.")
-            text = city
-        self.profile_service.update(uid, **{field: text})
-        saved = {"ru": "✅ Данные сохранены.", "en": "✅ Changes saved.", "ba": "✅ Мәғлүмәттәр һаҡланды."}[language]
-        return self._profile_response(uid, saved)
-
     def _profile_response(self, uid: str, notice: str = "") -> BotResponse:
         profile = self.profile_service.get(uid) or {}
-        cats = ", ".join(profile.get("favorite_categories") or []) or "не выбраны"
-        location = "передана" if profile.get("latitude") is not None else "не передана"
         language = profile.get("language", "ru")
         cats = ", ".join(profile.get("favorite_categories") or []) or t(language, "not_selected")
         location = t(language, "shared") if profile.get("latitude") is not None else t(language, "not_shared")
-        text = (f"{t(language, 'profile_title')}\n\n{t(language, 'field_name')}: <b>{html.escape(profile.get('name') or '—')}</b>\n"
-                f"{t(language, 'field_phone')}: <b>{html.escape(profile.get('phone') or '—')}</b>\n"
-                f"{t(language, 'field_city')}: <b>{html.escape(profile.get('city') or '—')}</b>\n"
-                f"{t(language, 'field_favorites')}: <b>{html.escape(cats)}</b>\n"
+        text = (f"{t(language, 'profile_title')}\n\n{t(language, 'field_favorites')}: <b>{html.escape(cats)}</b>\n"
                 f"{t(language, 'field_location')}: <b>{location}</b>\n"
                 f"{t(language, 'language_label')}: <b>{html.escape(language)}</b>")
         return BotResponse(text=(notice + "\n\n" if notice else "") + text, reply_markup=profile_keyboard(profile))
-
-    def handle_contact(self, user_id: str, phone: str) -> BotResponse:
-        profile = self.profile_service.get(str(user_id))
-        if not profile:
-            return BotResponse(text="Сначала начните с /start.")
-        state = profile.get("onboarding_state")
-        if state == "phone":
-            self.profile_service.update(str(user_id), phone=phone, onboarding_state="city")
-            return BotResponse(text=t(profile.get("language"), "city"), reply_markup={"inline_keyboard": [[{"text": "Пропустить", "callback_data": "onboarding:skip_city"}]]})
-        self.profile_service.update(str(user_id), phone=phone)
-        language = self._language(str(user_id))
-        notice = {"ru": "✅ Телефон обновлён.", "en": "✅ Phone number updated.", "ba": "✅ Телефон яңыртылды."}[language]
-        return self._profile_response(str(user_id), notice)
 
     def handle_location(self, user_id: str, latitude: float, longitude: float) -> BotResponse:
         self.profile_service.ensure(str(user_id))
@@ -466,19 +423,8 @@ class BotRouter:
         self._awaiting_custom_date.pop(uid, None)
 
         try:
-            if callback_data.startswith("lang:"):
-                language = callback_data.split(":", 1)[1]
-                if language not in {"ru", "ba", "en"}:
-                    return BotResponse(text="Выберите язык кнопкой ниже.", reply_markup=language_keyboard())
-                self.profile_service.ensure(uid, language)
-                return BotResponse(text=t(language, "name"))
-
-            if callback_data == "onboarding:skip_city":
-                self.profile_service.update(uid, city=None, onboarding_state="complete")
-                profile = self.profile_service.get(uid) or {}
-                return self._build_main_menu_response(uid, t(profile.get("language"), "registered"))
-
             if callback_data == "profile:open":
+                self.profile_service.ensure(uid)
                 return self._profile_response(uid)
 
             if callback_data == "profile:language":
@@ -495,15 +441,16 @@ class BotRouter:
                 language = callback_data.split(":", 1)[1]
                 if language not in {"ru", "ba", "en"}:
                     return self._profile_response(uid)
+                self.profile_service.ensure(uid)
                 self.profile_service.update(uid, language=language)
                 return self._profile_response(uid, t(language, "lang_saved"))
 
             if callback_data == "profile:delete_confirm":
                 language = self._language(uid)
                 delete_text = {
-                    "ru": "⚠️ <b>Удалить аккаунт?</b>\n\nБудут безвозвратно удалены имя, телефон, город, геолокация, любимые категории и уведомления.",
-                    "en": "⚠️ <b>Delete your account?</b>\n\nYour name, phone, city, location, favourites and notifications will be permanently deleted.",
-                    "ba": "⚠️ <b>Аккаунтты юйырғамы?</b>\n\nИсем, телефон, ҡала, геолокация, яратҡан категориялар һәм хәбәрнамәләр бөтөнләй юйыласаҡ.",
+                    "ru": "⚠️ <b>Удалить профиль?</b>\n\nБудут удалены имя, город, геолокация, любимые категории и уведомления.",
+                    "en": "⚠️ <b>Delete your profile?</b>\n\nYour name, city, location, favourites and notifications will be deleted.",
+                    "ba": "⚠️ <b>Профилде юйырғамы?</b>\n\nИсем, ҡала, геолокация, яратҡан категориялар һәм хәбәрнамәләр юйыласаҡ.",
                 }[language]
                 return BotResponse(
                     text=delete_text,
@@ -515,8 +462,6 @@ class BotRouter:
                 self.sub_service.unsubscribe_all(uid)
                 self.profile_service.delete(uid)
                 self.reset_user_filters(uid)
-                self._awaiting_profile_field.pop(uid, None)
-                self._leisure_wizard.pop(uid, None)
                 deleted_text = {
                     "ru": "✅ Аккаунт и связанные данные удалены. Если захотите вернуться, начните заново.",
                     "en": "✅ Your account and associated data have been deleted. You can start again at any time.",
@@ -524,21 +469,8 @@ class BotRouter:
                 }[language]
                 return BotResponse(
                     text=deleted_text,
-                    reply_markup=language_keyboard(),
+                    reply_markup=main_menu_keyboard(),
                 )
-
-            if callback_data.startswith("profile:edit:"):
-                field = callback_data.rsplit(":", 1)[1]
-                if field not in {"name", "phone", "city"}:
-                    return self._profile_response(uid)
-                self._awaiting_profile_field[uid] = field
-                language = self._language(uid)
-                prompts = {
-                    "ru": {"name": "Введите новое имя.", "phone": "Отправьте новый номер кнопкой или введите его текстом.", "city": "Введите город проживания."},
-                    "en": {"name": "Enter your new name.", "phone": "Share your new number or enter it as text.", "city": "Enter your home city."},
-                    "ba": {"name": "Яңы исемегеҙҙе яҙығыҙ.", "phone": "Яңы номерҙы ебәрегеҙ йәки ҡулдан индерегеҙ.", "city": "Йәшәгән ҡалағыҙҙы яҙығыҙ."},
-                }
-                return BotResponse(text=prompts[language][field], reply_markup=contact_keyboard(language) if field == "phone" else None)
 
             if callback_data == "profile:categories":
                 profile = self.profile_service.get(uid) or {}
@@ -571,82 +503,31 @@ class BotRouter:
                 }
                 return BotResponse(text=messages[language], reply_markup=location_keyboard(language))
 
-            if callback_data == "leisure:start":
-                self.reset_user_filters(uid)
-                self._leisure_wizard[uid] = "form"
-                return self._leisure_form_response(uid)
-
-            if callback_data == "leisure:form":
-                self._leisure_wizard[uid] = "form"
-                return self._leisure_form_response(uid)
-
-            if callback_data == "leisure:city_menu":
-                language = self._language(uid)
-                return BotResponse(text=t(language, "choose_city"), reply_markup=leisure_cities_keyboard(language))
-
-            if callback_data == "leisure:city_manual":
-                self._leisure_wizard[uid] = "city_manual"
-                return BotResponse(text=t(self._language(uid), "enter_city"))
-
-            if callback_data.startswith("leisure:city:"):
-                self.get_user_filters(uid).city = callback_data.rsplit(":", 1)[1]
-                self._leisure_wizard[uid] = "form"
-                return self._leisure_form_response(uid)
-
-            if callback_data == "leisure:date_menu":
-                language = self._language(uid)
-                return BotResponse(text=t(language, "choose_date"), reply_markup=leisure_dates_keyboard(language))
-
-            if callback_data == "leisure:date_manual":
-                self._leisure_wizard[uid] = "date_manual"
-                return BotResponse(text=t(self._language(uid), "enter_date"))
-
-            if callback_data.startswith("leisure:date:"):
-                preset = callback_data.rsplit(":", 1)[1]
-                filters = self.get_user_filters(uid)
-                filters.date_preset = preset
-                filters.date_from, filters.date_to = resolve_date_preset(preset, self.settings.get_reference_date())
-                self._leisure_wizard[uid] = "form"
-                return self._leisure_form_response(uid)
-
-            if callback_data == "leisure:category_menu":
-                language = self._language(uid)
-                return BotResponse(text=t(language, "choose_types"), reply_markup=leisure_categories_keyboard(self.get_user_filters(uid).categories, language))
-
-            if callback_data == "leisure:category_manual":
-                self._leisure_wizard[uid] = "category_manual"
-                return BotResponse(text="🎭 Напишите вид досуга, например: лекция, мастер-класс или спектакль.")
-
-            if callback_data.startswith("leisure:cat:"):
-                category = callback_data.rsplit(":", 1)[1]
-                filters = self.get_user_filters(uid)
-                if category in filters.categories:
-                    filters.categories.remove(category)
-                else:
-                    filters.categories.append(category)
-                language = self._language(uid)
-                return BotResponse(text=t(language, "choose_types"), reply_markup=leisure_categories_keyboard(filters.categories, language))
-
-            if callback_data == "leisure:categories_done":
-                self._leisure_wizard[uid] = "form"
-                return self._leisure_form_response(uid)
-
-            if callback_data == "leisure:run":
-                filters = self.get_user_filters(uid)
-                if not filters.city or not filters.date_from or not filters.categories:
-                    return self._leisure_form_response(uid, t(self._language(uid), "fill_all"))
-                self._leisure_wizard.pop(uid, None)
-                return self._execute_search_response(uid)
-
             if callback_data == "menu:main":
                 return self._build_main_menu_response(uid)
+
+            if callback_data == "menu:filters":
+                return BotResponse(
+                    text="⚙️ <b>Фильтры поиска</b>\n" + format_filter_summary_block(filters) +
+                         "\n\nВыберите параметр: после выбора сразу покажу события.",
+                    reply_markup=filters_keyboard(filters),
+                )
+
+            if callback_data.startswith("filter_clear:"):
+                field = callback_data.split(":", 1)[1]
+                if field not in {"query_text", "time_after", "time_before", "max_duration_min", "language", "venue"}:
+                    return self._build_main_menu_response(uid)
+                setattr(filters, field, None)
+                filters.offset = 0
+                return self._search_after_filter_change(uid)
 
             if callback_data == "menu:help":
                 cnt = self.search_service.count_matching(filters)
                 subs_cnt = len(self.sub_service.list_subscriptions(uid))
                 return BotResponse(
                     text=format_help_message(),
-                    reply_markup=main_menu_keyboard(filters, matching_count=cnt, subs_count=subs_cnt),
+                    reply_markup=main_menu_keyboard(filters, matching_count=cnt, subs_count=subs_cnt,
+                                                    language=self._language(uid)),
                 )
 
             if callback_data == "menu:reset":
@@ -701,24 +582,24 @@ class BotRouter:
                 filters.date_preset = "weekend"
                 filters.date_from, filters.date_to = resolve_date_preset("weekend", self.settings.get_reference_date())
                 filters.offset = 0
-                return self._execute_search_response(uid)
+                return self._search_after_filter_change(uid)
 
             if callback_data == "preset:kids":
                 filters.max_age_limit = 6
                 filters.offset = 0
-                return self._execute_search_response(uid)
+                return self._search_after_filter_change(uid)
 
             if callback_data.startswith("city:"):
                 val = callback_data.split(":", 1)[1]
                 filters.city = None if val == "all" else val
                 filters.offset = 0
-                return self._execute_search_response(uid)
+                return self._search_after_filter_change(uid)
 
             if callback_data.startswith("cat:"):
                 val = callback_data.split(":", 1)[1]
                 filters.category = None if val == "all" else val
                 filters.offset = 0
-                return self._execute_search_response(uid)
+                return self._search_after_filter_change(uid)
 
             if callback_data.startswith("date:"):
                 val = callback_data.split(":", 1)[1]
@@ -738,7 +619,7 @@ class BotRouter:
                         val, self.settings.get_reference_date()
                     )
                 filters.offset = 0
-                return self._execute_search_response(uid)
+                return self._search_after_filter_change(uid)
 
             if callback_data.startswith("price:"):
                 val = callback_data.split(":", 1)[1]
@@ -752,13 +633,13 @@ class BotRouter:
                     filters.is_free_only = False
                     filters.max_price = int(val)
                 filters.offset = 0
-                return self._execute_search_response(uid)
+                return self._search_after_filter_change(uid)
 
             if callback_data.startswith("age:"):
                 val = callback_data.split(":", 1)[1]
                 filters.max_age_limit = None if val == "all" else int(val)
                 filters.offset = 0
-                return self._execute_search_response(uid)
+                return self._search_after_filter_change(uid)
 
             if callback_data == "search:run":
                 return self._execute_search_response(uid)
@@ -811,7 +692,7 @@ class BotRouter:
                 filters = self.reset_user_filters(uid)
                 filters.city = None if city_val == "Все города" else city_val
                 filters.category = None if cat_val in ("Все категории", "все категории") else cat_val
-                return self._execute_search_response(uid)
+                return self._search_after_filter_change(uid)
 
             if callback_data.startswith("unsub_id:"):
                 sub_id = callback_data.split(":", 1)[1]

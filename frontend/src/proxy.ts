@@ -23,7 +23,7 @@ export function proxy(request: NextRequest) {
 
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  response.headers.set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
   response.headers.set("Content-Security-Policy", policy);
   if (!embeddable) response.headers.set("X-Frame-Options", "DENY");
   if (request.nextUrl.protocol === "https:") {

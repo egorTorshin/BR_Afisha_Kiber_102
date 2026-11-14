@@ -1,10 +1,10 @@
 """Request-scoped agent pipeline. Model output never supplies event facts or authority."""
 
 import json
+import re
 import hashlib
 import time
 import uuid
-from datetime import date
 from typing import MutableMapping
 
 from src.agent.decision_router import DecisionRouter
@@ -22,10 +22,28 @@ from src.config import Settings
 from src.services.normalizer import parse_free_text_query
 from src.services.search_service import SearchService
 from src.utils.metrics import AI_CALLS, AI_LATENCY, AI_TOKENS, AI_COST, AI_FALLBACKS
+from src.utils.logger import scrub_pii
 
 
 _YES = {"да", "подтверждаю", "подтвердить", "да, подтверждаю"}
 _NO = {"нет", "отмена", "отменить"}
+
+
+def _search_explanation(constraints: ConstraintSet | None) -> str:
+    if constraints is None:
+        return "Подобрал события из опубликованного каталога."
+    details = []
+    for key, label in (("city", "город"), ("category", "категория"),
+                       ("date_from", "период с"), ("date_to", "период до"),
+                       ("time_after", "после"), ("time_before", "до"),
+                       ("max_duration_min", "длительность до, мин"),
+                       ("max_price", "бюджет до"), ("max_age_limit", "возраст до")):
+        value = getattr(constraints, key, None)
+        if value is not None:
+            details.append(f"{label} {value}")
+    if constraints.is_free_only:
+        details.append("только бесплатные")
+    return "Подобрал события с учётом условий: " + ", ".join(details) + "." if details else "Подобрал события из опубликованного каталога."
 
 
 def _confirmation_message(call: ToolCall) -> str:
@@ -80,10 +98,15 @@ class AgentOrchestrator:
         cards: list[AgentEventCard] = []
         constraints: ConstraintSet | None = None
         search_call: ToolCall | None = None
+        last_search_explanation: str | None = None
+        heavy_result_kind: str | None = None
         normalized = request.message.strip().casefold().replace("ё", "е")
 
         def execute(call: ToolCall, *, confirmed: bool = False):
             result = self.registry.execute(call.name, call.arguments, context=context, confirmed=confirmed)
+            nonlocal last_search_explanation
+            if call.name == "search_events" and isinstance(result.payload, dict):
+                last_search_explanation = result.payload.get("explanation")
             calls.append(call)
             tool_ids.append(result.result_ids)
             return result
@@ -153,6 +176,8 @@ class AgentOrchestrator:
                         fallback_reason = "light_incomplete"
                 if trace.model_route == ModelRoute.HEAVY and fallback_reason is None and stop != "clarification":
                     heavy = self.heavy.run(request.message, state, context=context, stop_on_confirmation=True)
+                    heavy_result_kind = heavy.result.kind
+                    last_search_explanation = heavy.last_search_explanation
                     selected.append(heavy.model_name)
                     trace.model_name = heavy.model_name
                     trace.input_tokens += heavy.input_tokens
@@ -187,16 +212,27 @@ class AgentOrchestrator:
                         stop, message = "clarification", heavy.result.clarification_question or "Уточните запрос."
                     elif heavy.result.kind == "recommendation":
                         basis = heavy.basis_event_ids
+                        message = heavy.result.short_explanation
                     elif heavy.result.kind == "no_data":
-                        stop, message = "no_data", "По вашему запросу событий не найдено."
+                        stop = "no_data"
+                        message = " ".join(filter(None, [heavy.result.short_explanation,
+                                                         heavy.result.constraint_relaxation,
+                                                         last_search_explanation]))
                     elif heavy.result.kind == "cannot_satisfy":
-                        stop, message = "cannot_satisfy", "Не удалось найти события со всеми условиями."
+                        stop = "cannot_satisfy"
+                        message = " ".join(filter(None, [heavy.result.short_explanation,
+                                                         heavy.result.constraint_relaxation,
+                                                         last_search_explanation]))
                     else:
                         fallback_reason = heavy.stop_reason
                 if fallback_reason and stop not in {"clarification", "confirmation_required"}:
-                    if features.intent == "search_events" and not any(context.security_flags.model_dump().values()):
+                    if (features.intent == "other" and not any(context.security_flags.model_dump().values())
+                            and re.search(r"не знаю|не уверен|без разницы|куда-нибудь", normalized)):
+                        stop, message = "clarification", "Уточните, пожалуйста, город, дату или интересующий вид мероприятия."
+                    elif features.intent == "search_events" and not any(context.security_flags.model_dump().values()):
                         try:
-                            filters = parse_free_text_query(request.message, date.today())
+                            filters = parse_free_text_query(request.message,
+                                ref_date=self.settings.get_reference_date(), db=getattr(self.search, "db", None))
                             merged = state.active_constraints.model_dump(mode="json", exclude_none=True)
                             for key in ConstraintSet.model_fields:
                                 value = getattr(filters, key, None)
@@ -234,18 +270,22 @@ class AgentOrchestrator:
                     price_min=event.price_min, price_max=event.price_max,
                     is_free=event.is_free, age_limit=event.age_limit,
                     source_url=event.source_url, org_link=event.org_link))
+            cards = cards[:5]
             if basis and not cards:
                 stop, message = "no_data", "Данные о найденных событиях недоступны."
             elif search_call and not cards and stop == "completed":
-                stop, message = "no_data", "По вашему запросу событий не найдено."
+                stop, message = "no_data", last_search_explanation or "По вашему запросу событий не найдено. Попробуйте расширить период или убрать фильтр города."
+            elif not cards and stop in {"fallback_search", "no_data"} and heavy_result_kind is None:
+                message = last_search_explanation or "По вашему запросу событий не найдено. Попробуйте расширить период или убрать фильтр города."
             elif cards:
-                message = f"Найдено событий: {len(cards)}."
+                if heavy_result_kind != "recommendation":
+                    message = _search_explanation(constraints)
                 stop = "completed" if stop == "completed" else stop
                 state.last_result_ids = [card.id for card in cards]
                 state.shown_event_ids = list(dict.fromkeys([*state.shown_event_ids, *state.last_result_ids]))
                 state.has_previous_results = True
                 if search_call:
-                    state.next_search_offset = int(search_call.arguments.get("offset", 0)) + len(tool_ids[-1])
+                    state.next_search_offset = int(search_call.arguments.get("offset", 0)) + len(cards)
             if constraints is not None and stop in {"completed", "fallback_search", "no_data",
                                                     "cannot_satisfy"}:
                 state.active_constraints = constraints
@@ -265,18 +305,14 @@ class AgentOrchestrator:
             trace.selected_models = selected
             trace.model_usage = usage
             trace.cost = self.settings.model_cost(usage)
-            # Numeric pagination/price flags are useful telemetry; free text and identifiers are private.
-            safe_args = {"limit", "offset", "max_price", "max_age_limit", "is_free_only"}
-            private_args = {"city", "category", "date_from", "date_to", "text", "event_id",
-                            "venue", "message", "time_after", "time_before"}
+            trace.user_query = scrub_pii(request.message)[:500] if checked.decision == PolicyDecision.ALLOWED else None
+            trace.plan_summary = f"{('fallback' if fallback_reason else trace.model_route.value)} intent={features.intent}; tools={','.join(call.name for call in calls) or 'none'}"
+            safe_args = {"city", "category", "date_from", "date_to", "venue", "event_id",
+                         "time_after", "time_before", "max_duration_min", "limit", "offset", "max_price",
+                         "max_age_limit", "is_free_only"}
             trace.tool_calls = [ToolCall(name=call.name, arguments={
-                **{key: value for key, value in call.arguments.items()
-                   if key in safe_args and type(value) in (int, bool)},
-                "redacted_fields": sorted(key for key, value in call.arguments.items()
-                                          if key in private_args),
-                "other_fields_count": sum(1 for key, value in call.arguments.items()
-                                          if key not in private_args and
-                                          (key not in safe_args or type(value) not in (int, bool))),
+                key: (scrub_pii(str(value))[:200] if key in {"text", "message"} else value)
+                for key, value in call.arguments.items() if key in safe_args or key in {"text", "message"}
             }) for call in calls]
             trace.tool_result_ids = tool_ids
             trace.result_ids = [card.id for card in cards]
@@ -291,7 +327,7 @@ class AgentOrchestrator:
                 router_component = "jev" if self.settings.jev_enabled and self.settings.ai_mode != "no-ai" else "regex"
                 AI_CALLS.labels(router_component,
                                 "fallback" if trace.router_decision.fallback else "success").inc()
-                AI_LATENCY.labels(router_component).observe(trace.router_decision.latency_ms / 1000)
+                AI_LATENCY.labels(router_component).observe(getattr(trace.router_decision, "latency_ms", 0) / 1000)
             if usage:
                 for index, _item in enumerate(usage):
                     model_component = "heavy" if (trace.escalated and index == len(usage) - 1) else "light"

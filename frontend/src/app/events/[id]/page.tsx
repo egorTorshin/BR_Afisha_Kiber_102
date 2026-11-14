@@ -59,7 +59,6 @@ export default async function EventDetail({ params, searchParams }: Props) {
 
   const requestedReturn = Array.isArray(query.returnTo) ? query.returnTo[0] : query.returnTo;
   const returnHref = requestedReturn?.startsWith("/events?") && !requestedReturn.startsWith("//") ? requestedReturn : "/events";
-  const source = safeUrl(event.source_url);
   const organizer = safeUrl(event.org_link);
   const cancelled = event.status === "cancelled" || event.status === "отменено";
   const time = formatDate(event.date_start);
@@ -100,8 +99,15 @@ export default async function EventDetail({ params, searchParams }: Props) {
       <section className="trust-panel" aria-labelledby="trust-heading">
         <h2 id="trust-heading">Информация и проверка</h2>
         <p><strong>Статус:</strong> <EventStatusBadge status={event.status} disputed={event.is_disputed} /></p>
-        <p><strong>Источник:</strong> {source ? <a href={source} target="_blank" rel="noopener noreferrer">{event.source_type || "Страница мероприятия"}<ArrowUpRight size={15} aria-hidden="true" /><span className="sr-only"> (откроется в новой вкладке)</span></a> : "Источник не указан"}</p>
-        <p><strong>Последняя проверка:</strong> {formatVerified(event.verified_at)}</p>
+        <div><strong>Источники:</strong>
+          <ul>{(event.sources?.length ? event.sources : [{ source_url: event.source_url, source_type: event.source_type, verified_at: event.verified_at }]).map((s, index) => {
+            const url = safeUrl(s.source_url);
+            return <li key={`${s.source_url}-${index}`}>
+              {url ? <a href={url} target="_blank" rel="noopener noreferrer">{s.source_type || "Страница мероприятия"}<ArrowUpRight size={15} aria-hidden="true" /></a> : (s.source_type || "Источник не указан")}
+              {` · проверено ${formatVerified(s.verified_at)}`}
+            </li>;
+          })}</ul>
+        </div>
         {event.is_disputed && event.dispute_reason && <p>{event.dispute_reason}</p>}
       </section>
       {organizer && <a className="button organizer-link" href={organizer} target="_blank" rel="noopener noreferrer" itemProp="url">Организатор <ArrowUpRight size={17} aria-hidden="true" /><span className="sr-only"> (откроется в новой вкладке)</span></a>}
