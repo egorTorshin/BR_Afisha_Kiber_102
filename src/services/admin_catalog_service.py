@@ -45,7 +45,8 @@ class AdminCatalogService:
             "events": sum(statuses.values()), "published": statuses.get("published", 0),
             "draft": statuses.get("draft", 0), "cancelled": statuses.get("cancelled", 0),
             "moderation": self.db.fetchone("SELECT COUNT(*) AS n FROM events WHERE merged_into IS NULL AND "
-                                            "(is_disputed = 1 OR (raw_event_id IS NOT NULL AND status = 'draft'))")["n"],
+                                            "(is_disputed = 1 OR (raw_event_id IS NOT NULL AND status = 'draft'))")["n"]
+                          + self.db.fetchone("SELECT COUNT(*) AS n FROM event_submissions WHERE status = 'pending'")["n"],
             "feedback": self.db.fetchone("SELECT COUNT(*) AS n FROM feedback WHERE status IN ('pending','in_progress')")["n"],
             "users": self.db.fetchone("SELECT COUNT(*) AS n FROM users")["n"],
         }

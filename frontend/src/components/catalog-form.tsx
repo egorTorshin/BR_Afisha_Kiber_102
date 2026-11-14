@@ -3,12 +3,16 @@
 import Form from "next/form";
 import Link from "next/link";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { SearchBar } from "./ui";
+import { AgentChat } from "./agent-chat";
 import { eventsHref } from "@/lib/event-query";
 import type { CategoryItem, CityItem, EventFilters, VenueItem } from "@/lib/types";
 
 type MenuName = "city" | "date" | "category" | "advanced" | null;
 const dateValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const shortDate = (value: string) => {
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short" }).format(date);
+};
 const midnight = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
 function Calendar({ from, to, onChange, close }: { from: string; to: string; onChange: (from: string, to: string) => void; close: () => void }) {
@@ -46,7 +50,7 @@ function FilterChips({ filters }: { filters: EventFilters }) {
   const labels: [keyof EventFilters, string][] = [["query_text", "Поиск"], ["city", "Город"], ["category", "Категория"], ["date_from", "Дата с"], ["date_to", "Дата по"], ["venue", "Площадка"], ["max_price", "Цена до"], ["max_age_limit", "Возраст до"], ["is_free_only", "Бесплатные"]];
   const active = labels.filter(([key]) => filters[key] !== undefined && filters[key] !== false && filters[key] !== "");
   if (!active.length) return null;
-  return <div className="active-filters" aria-label="Применённые фильтры"><span className="active-filters-label">Фильтры:</span>{active.map(([key, label]) => { const value = filters[key]; const text = key === "is_free_only" ? "Бесплатные" : `${label}: ${String(value)}`; return <Link className="filter-chip" key={key} href={eventsHref({ ...filters, [key]: undefined, page: 1 })} aria-label={`Удалить фильтр: ${text}`}>{text}<span aria-hidden="true">×</span></Link>; })}<Link className="reset-link" href="/events">Сбросить всё</Link></div>;
+  return <div className="active-filters" aria-label="Применённые фильтры"><span className="active-filters-label">Фильтры:</span>{active.map(([key, label]) => { const value = filters[key]; const text = key === "is_free_only" ? "Бесплатные" : `${label}: ${key === "date_from" || key === "date_to" ? shortDate(String(value)) : String(value)}`; return <Link className="filter-chip" key={key} href={eventsHref({ ...filters, [key]: undefined, page: 1 })} aria-label={`Удалить фильтр: ${text}`}>{text}<span aria-hidden="true">×</span></Link>; })}<Link className="reset-link" href="/?sort=date_asc#catalog">Сбросить всё</Link></div>;
 }
 
 export function CatalogForm({ filters, cities, categories }: { filters: EventFilters; cities: CityItem[]; categories: CategoryItem[]; venues: VenueItem[] }) {
@@ -62,12 +66,13 @@ export function CatalogForm({ filters, cities, categories }: { filters: EventFil
   const toggle = (name: Exclude<MenuName, null>, button: HTMLButtonElement) => { trigger.current = button; setOpen(open === name ? null : name); };
   const advancedActive = Boolean(filters.venue || filters.max_price !== undefined || filters.max_age_limit !== undefined || filters.is_free_only);
   return <>
-    <Form action="/events" className="catalog-form" aria-label="Фильтры мероприятий">
-      <SearchBar defaultValue={filters.query_text} />
+    <div className="catalog-agent"><AgentChat compact /></div>
+    <Form action="/" className="catalog-form" aria-label="Фильтры мероприятий">
+      {filters.query_text && <input type="hidden" name="query_text" value={filters.query_text} />}
       <div className="filter-controls" ref={root}>
         <div className="filter-triggers">
           <FilterChip active={Boolean(city)} expanded={open === "city"} onClick={(e) => toggle("city", e.currentTarget)}>{city || "Город"}</FilterChip>
-          <FilterChip active={Boolean(from || to)} expanded={open === "date"} onClick={(e) => toggle("date", e.currentTarget)}>{from ? `${from}${to ? ` — ${to}` : ""}` : "Когда"}</FilterChip>
+          <FilterChip active={Boolean(from || to)} expanded={open === "date"} onClick={(e) => toggle("date", e.currentTarget)}>{from ? `${to ? `${shortDate(from)} — ${shortDate(to)}` : `С ${shortDate(from)}`}` : "Когда"}</FilterChip>
           <FilterChip active={Boolean(category)} expanded={open === "category"} onClick={(e) => toggle("category", e.currentTarget)}>{category || "Категория"}</FilterChip>
           <FilterChip active={advancedActive} expanded={open === "advanced"} onClick={(e) => toggle("advanced", e.currentTarget)}>Дополнительно</FilterChip>
         </div>
@@ -88,7 +93,7 @@ export function CatalogForm({ filters, cities, categories }: { filters: EventFil
 export function ResultsToolbar({ filters }: { filters: EventFilters }) {
   const preserved = Object.entries(filters).filter(([key, value]) => !["sort", "page_size", "page"].includes(key) && value !== undefined && value !== false);
   const base = Object.fromEntries(preserved) as EventFilters;
-  const sorts = [["date_asc", "Сначала ближайшие"], ["date_desc", "Сначала поздние"], ["price_asc", "Сначала дешевле"]] as const;
+  const sorts = [["date_asc", "Ближайшие"], ["date_desc", "Поздние"], ["price_asc", "Дешевле"]] as const;
   const activeSort = sorts.find(([value]) => value === filters.sort)?.[1] || sorts[0][1];
-  return <div className="results-toolbar" aria-label="Настройки выдачи"><span>Результаты афиши</span><div className="toolbar-options"><details className="toolbar-menu"><summary>Сортировка: <strong>{activeSort}</strong></summary><div className="toolbar-popover">{sorts.map(([value, label]) => <Link key={value} href={eventsHref({ ...base, sort: value, page: 1 })} aria-current={filters.sort === value ? "true" : undefined}>{label}</Link>)}</div></details><details className="toolbar-menu"><summary>На странице: <strong>{filters.page_size || 12}</strong></summary><div className="toolbar-popover">{[...new Set([12, 24, 48, filters.page_size || 12])].sort((a,b) => a-b).map((size) => <Link key={size} href={eventsHref({ ...base, sort: filters.sort, page_size: size, page: 1 })} aria-current={filters.page_size === size ? "true" : undefined}>{size} событий</Link>)}</div></details></div></div>;
+  return <div className="results-toolbar" aria-label="Настройки выдачи"><span>Результаты афиши</span><div className="toolbar-options"><details className="toolbar-menu"><summary>Порядок: <strong>{activeSort}</strong></summary><div className="toolbar-popover">{sorts.map(([value, label]) => <Link key={value} href={eventsHref({ ...base, sort: value, page_size: filters.page_size, page: 1 })} onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")} aria-current={filters.sort === value ? "true" : undefined}>{label}</Link>)}</div></details><details className="toolbar-menu"><summary>Карточек: <strong>{filters.page_size || 12}</strong></summary><div className="toolbar-popover">{[...new Set([12, 24, 48, filters.page_size || 12])].sort((a,b) => a-b).map((size) => <Link key={size} href={eventsHref({ ...base, sort: filters.sort, page_size: size, page: 1 })} onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")} aria-current={filters.page_size === size ? "true" : undefined}>{size} событий</Link>)}</div></details></div></div>;
 }

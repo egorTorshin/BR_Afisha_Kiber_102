@@ -115,6 +115,9 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
                     elif path == "/feedback":
                         quotas = [("feedback:visitor", visitor, 10, 60),
                                   ("feedback:ip", client_ip, 200, 60)]
+                    elif path == "/api/v1/event-submissions":
+                        quotas = [("event-submission:visitor", visitor, 3, 3600),
+                                  ("event-submission:ip", client_ip, 30, 3600)]
                     elif path == "/api/v1/agent/chat":
                         identity = request.cookies.get("agent_session") or visitor
                         quotas = [("agent-chat:session", identity, 30, 60),

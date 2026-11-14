@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, LoaderCircle, Send } from "lucide-react";
+import { ArrowRight, Send } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { AgentChatResponse, AgentEventCard } from "@/lib/types";
+import { cardTitle } from "@/lib/event-title";
 import { formatDate } from "./ui";
 import { VoiceInput } from "./voice-input";
-
-type ChatMessage = { role: "user" | "assistant"; text: string };
 
 function price(card: AgentEventCard) {
   if (card.is_free) return "Бесплатно";
@@ -25,24 +24,26 @@ function price(card: AgentEventCard) {
 export function AgentChat({ compact = false }: { compact?: boolean }) {
   const [message, setMessage] = useState("");
   const [conversationId, setConversationId] = useState<string>();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [cards, setCards] = useState<AgentEventCard[]>([]);
+  const [note, setNote] = useState<string>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
-        const saved = JSON.parse(localStorage.getItem("afisha-agent-chat") || "null");
-        if (saved?.messages && Array.isArray(saved.messages)) setMessages(saved.messages.slice(-10));
+        const saved = JSON.parse(sessionStorage.getItem("afisha-agent-search") || "null");
+        const restoredCards = saved?.cards && Array.isArray(saved.cards) ? saved.cards.slice(0, 12) : [];
+        setCards(restoredCards);
         if (typeof saved?.conversationId === "string") setConversationId(saved.conversationId);
-      } catch { localStorage.removeItem("afisha-agent-chat"); }
+        if (typeof saved?.note === "string" && !restoredCards.length) setNote(saved.note);
+      } catch { sessionStorage.removeItem("afisha-agent-search"); }
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
   useEffect(() => {
-    if (messages.length || conversationId) localStorage.setItem("afisha-agent-chat", JSON.stringify({ messages: messages.slice(-10), conversationId }));
-  }, [messages, conversationId]);
+    if (conversationId || cards.length || note) sessionStorage.setItem("afisha-agent-search", JSON.stringify({ cards, conversationId, note }));
+  }, [cards, conversationId, note]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -50,7 +51,8 @@ export function AgentChat({ compact = false }: { compact?: boolean }) {
     if (!text || pending) return;
     setMessage("");
     setError(undefined);
-    setMessages((current) => [...current, { role: "user", text }]);
+    setNote(undefined);
+    setCards([]);
     setPending(true);
     try {
       const result: AgentChatResponse = await api.agentChat({
@@ -58,8 +60,8 @@ export function AgentChat({ compact = false }: { compact?: boolean }) {
         conversation_id: conversationId,
       });
       setConversationId(result.conversation_id);
-      setMessages((current) => [...current, { role: "assistant", text: result.message }]);
       setCards(result.event_cards);
+      setNote(result.event_cards.length ? undefined : result.message);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Агент временно недоступен.");
     } finally {
@@ -69,41 +71,25 @@ export function AgentChat({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className={`agent-chat ${compact ? "agent-chat-compact" : ""}`}>
-      <div className="agent-chat-intro">
-        <div>
-          <h2>Ваш запрос</h2>
-          <p>Помощник уточнит детали и покажет опубликованные события.</p>
-        </div>
-      </div>
-      <div className="agent-chat-messages" aria-live="polite">
-        {messages.length === 0 && (
-          <p className="agent-chat-empty">Например: «Куда сходить с ребёнком в Уфе в субботу до 1000 рублей?»</p>
-        )}
-        {messages.map((item, index) => (
-          <div key={`${item.role}-${index}`} className={`agent-message agent-message-${item.role}`}>
-            {item.text}
-          </div>
-        ))}
-        {pending && <LoaderCircle className="animate-spin agent-chat-loader" size={20} aria-label="Агент думает" />}
-      </div>
-      {cards.length > 0 && (
-        <div className="agent-card-grid">
-          {cards.map((card) => (
-            <article className="agent-card" key={card.id}>
-              <p className="event-meta">{card.category} · {card.age_limit}+</p>
-              <h3><Link href={`/events/${encodeURIComponent(card.id)}`}>{card.title}</Link></h3>
-              <p>{formatDate(card.date_start)} · {card.city}</p>
-              <div className="agent-card-bottom"><strong>{price(card)}</strong><Link className="text-link" href={`/events/${encodeURIComponent(card.id)}`}>Карточка <ArrowRight size={14} /></Link></div>
-            </article>
-          ))}
-        </div>
-      )}
       <form className="agent-chat-form" onSubmit={submit}>
-        <label className="sr-only" htmlFor="agent-message">Ваш вопрос агенту</label>
+        <label className="sr-only" htmlFor="agent-message">Опишите нужное событие</label>
         <VoiceInput disabled={pending} onText={(text) => setMessage((current) => current ? `${current} ${text}` : text)} />
         <input id="agent-message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Например: бесплатные выставки в Уфе…" maxLength={4000} disabled={pending} />
         <button className="button" type="submit" disabled={pending || !message.trim()}>{pending ? "Ищем…" : "Спросить"} <Send size={16} /></button>
       </form>
+      {note && <p className="agent-search-note" role="status">{note}</p>}
+      {cards.length > 0 && (
+        <div className="agent-search-results" aria-live="polite"><p className="results-note">Подобрано событий: {cards.length}</p><div className="agent-card-grid">
+          {cards.map((card) => (
+            <article className="agent-card" key={card.id}>
+              <p className="event-meta">{card.category} · {card.age_limit}+</p>
+              <h3><Link href={`/events/${encodeURIComponent(card.id)}`}>{cardTitle(card.title)}</Link></h3>
+              <p>{formatDate(card.date_start)} · {card.city}</p>
+              <div className="agent-card-bottom"><strong>{price(card)}</strong><Link className="text-link" href={`/events/${encodeURIComponent(card.id)}`}>Карточка <ArrowRight size={14} /></Link></div>
+            </article>
+          ))}
+        </div></div>
+      )}
       {error && <p className="agent-chat-error" role="alert">{error}</p>}
     </div>
   );

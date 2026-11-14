@@ -4,8 +4,7 @@ import { usePathname } from "next/navigation";
 import { useRef, useState } from "react";
 import { Menu, X } from "lucide-react";
 const links = [
-  { href: "/events", label: "Каталог" },
-  { href: "/agent", label: "Поиск с помощником" },
+  { href: "/submit-event", label: "Добавить событие" },
   { href: "/feedback", label: "Обратная связь" },
   { href: "/profile", label: "Мой профиль" },
 ];
@@ -39,7 +38,6 @@ export function Header() {
             </Link>
           ))}
         </nav>
-        <Link className="header-search" href="/events">Найти событие</Link>
         <button
           ref={menuButton}
           className="menu-button"
@@ -77,7 +75,7 @@ export function Footer() {
     <footer className="site-footer">
       <div className="container footer-inner">
         <Link className="brand" href="/"><span className="brand-mark" aria-hidden="true">А</span><span>Афиша <span className="brand-sub">Башкортостана</span></span></Link>
-        <nav aria-label="Ссылки в подвале"><Link href="/events">Каталог</Link><Link href="/agent">Поиск с помощником</Link><Link href="/feedback">Обратная связь</Link><Link href="/developers">Виджет</Link></nav>
+        <nav aria-label="Ссылки в подвале"><Link href="/submit-event">Добавить событие</Link><Link href="/feedback">Обратная связь</Link><Link href="/developers">Виджет</Link></nav>
         <p>Независимый навигатор по опубликованным событиям республики.</p>
       </div>
     </footer>

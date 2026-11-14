@@ -247,9 +247,9 @@ def _table_exists(db, table):
 
 def test_fresh_baseline_is_atomic_and_repeatable(empty_db, tmp_path):
     db = empty_db
-    assert apply_migrations(db, MIGRATIONS) == 1
+    assert apply_migrations(db, MIGRATIONS) == 2
     assert apply_migrations(db, MIGRATIONS) == 0
-    assert db.fetchone("SELECT version FROM schema_migrations")["version"] == "001_baseline.sql"
+    assert {row["version"] for row in db.fetchall("SELECT version FROM schema_migrations")} == {"001_baseline.sql", "002_event_submissions.sql"}
     columns = _columns(db, "bot_profiles")
     assert "phone" not in columns
     assert {"period_from", "period_to"}.issubset(_columns(db, "subscriptions"))
@@ -267,11 +267,11 @@ def test_legacy_history_refused_without_data_loss(empty_db):
 
 def test_legacy_006_marker_does_not_replay_baseline(db):
     _, record = ImportService(db).create_event_manual(event())
-    db.execute("UPDATE schema_migrations SET version = '006_unified_users.sql'")
+    db.execute("UPDATE schema_migrations SET version = '006_unified_users.sql' WHERE version = '002_event_submissions.sql'")
     with pytest.raises(RuntimeError, match="Legacy migration history"):
         apply_migrations(db, MIGRATIONS)
     assert db.fetchone("SELECT id FROM events WHERE id = ?", (record.id,))["id"] == record.id
-    assert db.fetchone("SELECT version FROM schema_migrations")["version"] == "006_unified_users.sql"
+    assert db.fetchone("SELECT version FROM schema_migrations WHERE version = '006_unified_users.sql'")["version"] == "006_unified_users.sql"
 
 
 def test_failed_baseline_is_atomic(empty_db, tmp_path):

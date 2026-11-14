@@ -68,6 +68,30 @@ class AdminEventPatchInput(BaseModel):
     status: Optional[Literal["published", "draft", "cancelled"]] = None
 
 
+class EventSubmissionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=2, max_length=250)
+    category: Literal["концерт", "спектакль", "выставка", "фестиваль", "кино", "экскурсия", "другое"]
+    date_start: str = Field(min_length=16, max_length=40)
+    date_end: Optional[str] = Field(default=None, max_length=40)
+    city: str = Field(min_length=2, max_length=120)
+    venue: str = Field(min_length=2, max_length=250)
+    address: str = Field(min_length=2, max_length=500)
+    description: str = Field(min_length=20, max_length=10000)
+    source_url: str = Field(min_length=10, max_length=2048)
+    org_link: Optional[str] = Field(default=None, max_length=2048)
+    price_min: Optional[int] = Field(default=None, ge=0)
+    price_max: Optional[int] = Field(default=None, ge=0)
+    is_free: bool = False
+    age_limit: Literal[0, 6, 12, 16, 18] = 0
+
+
+class SubmissionReviewInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["approved", "rejected"]
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
 class PublicEventSource(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     source_url: str

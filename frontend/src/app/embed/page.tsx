@@ -1,6 +1,7 @@
 import { api, ApiError } from "@/lib/api";
 import { formatDate } from "@/components/ui";
 import type { EventFilters } from "@/lib/types";
+import { cardTitle } from "@/lib/event-title";
 import styles from "./widget.module.css";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +62,7 @@ export default async function Embed({ searchParams }: { searchParams: Promise<Pa
     <header className={styles.header}><span className={styles.brand}>Афиша Башкортостана</span><a href="/events" target="_blank" rel="noreferrer">Все события</a></header>
     {message ? <p className={styles.state} role="alert">{message}</p> : result?.events.length ? <div className={styles.list}>
       {result.events.map(event => <article key={event.id} className={styles.event}>
-        <p className={styles.date}>{formatDate(event.date_start)}</p><a className={styles.title} href={detailUrl(event.id)} target="_blank" rel="noreferrer">{event.title}</a>
+        <p className={styles.date}>{formatDate(event.date_start)}</p><a className={styles.title} href={detailUrl(event.id)} target="_blank" rel="noreferrer">{cardTitle(event.title)}</a>
         <p className={styles.meta}>{event.city} · {event.venue}</p><p className={styles.price}>{price(event)}</p>
       </article>)}
     </div> : <p className={styles.state}>Событий пока нет. Попробуйте изменить настройки виджета.</p>}

@@ -6,6 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { EventStatusBadge, ErrorState, formatDate } from "@/components/ui";
 import { ShareEvent } from "@/components/share-event";
 import { RecordView } from "@/components/record-view";
+import { EventMap } from "@/components/event-map";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ returnTo?: string | string[] }> };
@@ -40,13 +41,6 @@ function safeUrl(value: string | null | undefined) {
   }
 }
 
-function formatVerified(value: string | null | undefined) {
-  if (!value) return "Дата проверки не указана";
-  const date = new Date(/[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}+05:00`);
-  return Number.isNaN(date.getTime()) ? "Дата проверки не указана" :
-    new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Yekaterinburg" }).format(date);
-}
-
 export default async function EventDetail({ params, searchParams }: Props) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   let event;
@@ -58,7 +52,7 @@ export default async function EventDetail({ params, searchParams }: Props) {
   }
 
   const requestedReturn = Array.isArray(query.returnTo) ? query.returnTo[0] : query.returnTo;
-  const returnHref = requestedReturn?.startsWith("/events?") && !requestedReturn.startsWith("//") ? requestedReturn : "/events";
+  const returnHref = requestedReturn && (/^\/\?(?!\/)/.test(requestedReturn) || requestedReturn.startsWith("/events?")) ? requestedReturn : "/#catalog";
   const organizer = safeUrl(event.org_link);
   const cancelled = event.status === "cancelled" || event.status === "отменено";
   const time = formatDate(event.date_start);
@@ -92,25 +86,12 @@ export default async function EventDetail({ params, searchParams }: Props) {
         <div><dt>Возрастное ограничение</dt><dd>{Number.isFinite(event.age_limit) ? `${event.age_limit}+` : "Не указано"}</dd></div>
       </dl>
       {safeUrl(event.source_url) && <a className="detail-source text-link" href={safeUrl(event.source_url)} target="_blank" rel="noopener noreferrer">Открыть источник события <ArrowUpRight size={16} aria-hidden="true" /><span className="sr-only"> (откроется в новой вкладке)</span></a>}
+      <EventMap lat={event.lat} lon={event.lon} title={event.venue || event.title} />
       <section className="detail-copy" aria-labelledby="event-description-heading">
         <h2 id="event-description-heading">О событии</h2>
         <p itemProp="description">{event.description?.trim() || "Описание пока не добавлено."}</p>
       </section>
       {event.tags?.length > 0 && <section className="detail-section" aria-labelledby="event-tags-heading"><h2 id="event-tags-heading">Теги</h2><ul className="event-tags">{event.tags.map((tag, index) => <li key={`${tag}-${index}`}>{tag}</li>)}</ul></section>}
-      <section className="trust-panel" aria-labelledby="trust-heading">
-        <h2 id="trust-heading">Информация и проверка</h2>
-        <p><strong>Статус:</strong> <EventStatusBadge status={event.status} disputed={event.is_disputed} /></p>
-        <div><strong>Источники:</strong>
-          <ul>{(event.sources?.length ? event.sources : [{ source_url: event.source_url, source_type: event.source_type, verified_at: event.verified_at }]).map((s, index) => {
-            const url = safeUrl(s.source_url);
-            return <li key={`${s.source_url}-${index}`}>
-              {url ? <a href={url} target="_blank" rel="noopener noreferrer">{s.source_type || "Страница мероприятия"}<ArrowUpRight size={15} aria-hidden="true" /></a> : (s.source_type || "Источник не указан")}
-              {` · проверено ${formatVerified(s.verified_at)}`}
-            </li>;
-          })}</ul>
-        </div>
-        {event.is_disputed && event.dispute_reason && <p>{event.dispute_reason}</p>}
-      </section>
       {organizer && <a className="button organizer-link" href={organizer} target="_blank" rel="noopener noreferrer" itemProp="url">Организатор <ArrowUpRight size={17} aria-hidden="true" /><span className="sr-only"> (откроется в новой вкладке)</span></a>}
       <Link className="text-link detail-feedback" href={`/feedback?event_id=${encodeURIComponent(event.id)}`}>Сообщить о неточности <ArrowUpRight size={16} aria-hidden="true" /></Link>
     </article>

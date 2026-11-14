@@ -6,6 +6,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import type { CultureEvent } from "@/lib/types";
+import { cardTitle } from "@/lib/event-title";
 import { RetryButton } from "./retry-button";
 export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
   return (
@@ -56,7 +57,7 @@ export function EventCard({ event, returnHref }: { event: CultureEvent; returnHr
       <div className="event-date" aria-label={validDate ? formatDate(event.date_start) : "Дата уточняется"}><strong>{validDate ? new Intl.DateTimeFormat("ru-RU", { day: "2-digit", timeZone: "Asia/Yekaterinburg" }).format(date) : "—"}</strong><span>{validDate ? new Intl.DateTimeFormat("ru-RU", { month: "short", timeZone: "Asia/Yekaterinburg" }).format(date) : "дата"}</span><small>{validDate ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Yekaterinburg" }).format(date) : ""}</small></div>
       <div className="event-card-body">
         <div className="event-meta"><span>{event.category}</span><span>{event.age_limit}+</span></div>
-        <h3><Link href={detailHref}>{event.title}</Link></h3>
+        <h3><Link href={detailHref}>{cardTitle(event.title)}</Link></h3>
         <p className="event-place">{event.city} · {event.venue}</p>
         <div className="event-card-bottom">
           <strong>
@@ -66,7 +67,8 @@ export function EventCard({ event, returnHref }: { event: CultureEvent; returnHr
                 ? `от ${event.price_min.toLocaleString("ru-RU")} ₽`
                 : "Цена уточняется"}
           </strong>
-          <EventStatusBadge status={event.status} disputed={event.is_disputed} />
+          {(event.status !== "published" || event.is_disputed) &&
+            <EventStatusBadge status={event.status} disputed={event.is_disputed} />}
         </div>
         <Link className="event-open" href={detailHref}>Подробнее о событии <ArrowRight size={16} aria-hidden="true" /></Link>
       </div>
@@ -128,7 +130,7 @@ export function EmptyState({ explanation }: { explanation?: string | null }) {
         {explanation ||
           "По этому запросу ничего не нашлось. Попробуйте расширить период, выбрать другой город или убрать ограничение цены."}
       </p>
-      <Link className="text-link" href="/events">
+      <Link className="text-link" href="/">
         Посмотреть всю афишу <ArrowRight size={16} />
       </Link>
     </div>

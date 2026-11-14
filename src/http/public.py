@@ -8,9 +8,11 @@ from src.db.connection import Database
 from src.http.schemas import (CategoryItem, CityItem, EventPage, EventQuery, FeedbackInput,
                               HealthResponse, PublicEvent, VenueItem, VersionedEventPage,
                               VersionedEventQuery, SubscriptionInput, RecommendationsResponse,
-                              WeekendPlanInput, WeekendPlanResponse)
+                              WeekendPlanInput, WeekendPlanResponse, EventSubmissionInput)
 from src.models.schemas import FeedbackRecord, SearchFilters
 from src.services.feedback_service import FeedbackService
+from src.services.event_submission_service import EventSubmissionService
+from src.http.security import check_browser_origin
 from src.services.search_service import SearchService
 from src.services.subscription_service import SubscriptionService
 from src.services.recommendation_service import RecommendationService
@@ -24,6 +26,7 @@ def create_public_router(database: Database, settings: Settings | None = None) -
     router = APIRouter()
     search = SearchService(database)
     feedback = FeedbackService(database)
+    submissions = EventSubmissionService(database)
     subscriptions = SubscriptionService(database)
     recommendations = RecommendationService(database)
     users = UserService(database)
@@ -113,6 +116,12 @@ def create_public_router(database: Database, settings: Settings | None = None) -
                 raise HTTPException(status_code=404, detail="Событие не найдено")
             event_id = event.id
         return run_service(feedback.submit, data.message, event_id, actor="api:anonymous")
+
+    @router.post("/api/v1/event-submissions", status_code=201)
+    def submit_event(data: EventSubmissionInput, request: Request):
+        if settings:
+            check_browser_origin(request, settings)
+        return run_service(submissions.submit, data.model_dump(exclude_none=True))
 
     @router.get("/api/v1/subscriptions")
     def list_subscriptions(subscriber_id: str = Query(min_length=1, max_length=128)):

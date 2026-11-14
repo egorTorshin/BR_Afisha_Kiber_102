@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseEventQuery, eventsHref } from "../src/lib/event-query.ts";
+import { cardTitle } from "../src/lib/event-title.ts";
 
 test("all filters survive a shared URL, including zero and Cyrillic", () => {
   const filters = {
@@ -58,9 +59,14 @@ test("unsafe pagination and unknown sorting fall back; duplicate params use firs
   assert.equal(parsed.sort, "date_asc");
   assert.equal(parsed.query_text, undefined);
   assert.equal(parsed.is_free_only, undefined);
-  assert.equal(eventsHref(), "/events");
+  assert.equal(eventsHref(), "/");
   assert.equal(
     eventsHref({ city: "", max_price: 0, is_free_only: false }),
-    "/events?max_price=0",
+    "/?max_price=0",
   );
+});
+
+test("card titles omit only a trailing edition number", () => {
+  assert.equal(cardTitle("Концерт в Уфе (выпуск №51)"), "Концерт в Уфе");
+  assert.equal(cardTitle("Выставка (выпуск №3) в Уфе"), "Выставка (выпуск №3) в Уфе");
 });

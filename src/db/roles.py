@@ -50,6 +50,8 @@ for role in ('afisha_api', 'afisha_bot'):
     if role == 'afisha_api':
         for action in ('SELECT', 'INSERT', 'UPDATE'):
             permissions[action] += ('user_sessions',)
+        for action in ('SELECT', 'INSERT', 'UPDATE'):
+            permissions[action] += ('event_submissions',)
 
 
 def provision_roles(db: Database) -> None:

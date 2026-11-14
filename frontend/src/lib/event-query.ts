@@ -51,5 +51,5 @@ export function eventsHref(filters: EventFilters = {}): string {
     if (value !== undefined && value !== "" && value !== false)
       params.set(key, String(value));
   });
-  return `/events${params.size ? `?${params}` : ""}`;
+  return `/${params.size ? `?${params}` : ""}`;
 }

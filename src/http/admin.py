@@ -12,8 +12,9 @@ from src.services.user_service import UserService
 from src.services.admin_catalog_service import AdminCatalogService
 from src.services.feedback_service import FeedbackService
 from src.services.import_service import ImportService
+from src.services.event_submission_service import EventSubmissionService
 from src.http.schemas import (AdminEvent, AdminEventPage, AdminEventPatchInput, AuditEntry,
-                              EventStatusInput, FeedbackStatusInput, LoginInput)
+                              EventStatusInput, FeedbackStatusInput, LoginInput, SubmissionReviewInput)
 from src.http.security import check_browser_origin
 from src.http.errors import run_service
 from src.models.schemas import FeedbackRecord
@@ -25,6 +26,7 @@ def create_admin_router(database: Database, settings: Settings, auth: AdminAuth)
     feedback = FeedbackService(database)
     importer = ImportService(database, max_import_bytes=settings.max_import_bytes,
                              max_import_rows=settings.max_import_rows)
+    submissions = EventSubmissionService(database)
     users = UserService(database)
 
     def require_admin(request: Request, write: bool = False, *, roles: tuple[str, ...] = ("admin", "moderator")):
@@ -161,6 +163,16 @@ def create_admin_router(database: Database, settings: Settings, auth: AdminAuth)
     @router.get("/api/v1/admin/moderation", response_model=list[AdminEvent])
     def admin_moderation(session: dict = Depends(admin_read)):
         return catalog.disputed_events()
+
+    @router.get("/api/v1/admin/submissions")
+    def admin_submissions(session: dict = Depends(admin_read)):
+        return submissions.pending()
+
+    @router.patch("/api/v1/admin/submissions/{submission_id}")
+    def admin_review_submission(submission_id: str, body: SubmissionReviewInput,
+                                session: dict = Depends(admin_write)):
+        return run_service(submissions.review, submission_id, body.status,
+                           actor=f"admin:{session['username']}", note=body.note)
 
     @router.get("/api/v1/admin/audit", response_model=list[AuditEntry])
     def admin_audit(session: dict = Depends(admin_only_read)):
