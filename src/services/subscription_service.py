@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from src.db.connection import Database
 from src.services.normalizer import normalize_text
@@ -40,26 +40,60 @@ class SubscriptionService:
                 return r
         return None
 
-    def is_subscribed(self, user_id: str, city: Optional[str], category: Optional[str]) -> bool:
-        return self.find_subscription(
+    def is_subscribed(self, user_id: str, city: Optional[str], category: Optional[str],
+                      event_date: date | None = None) -> bool:
+        subscription = self.find_subscription(
             user_id,
             city or "Все города",
             category or "Все категории",
-        ) is not None
+        )
+        if subscription is None:
+            return False
+        if event_date is None:
+            return True
+        day = event_date.isoformat()
+        return ((subscription.get("period_from") is None or day >= subscription["period_from"])
+                and (subscription.get("period_to") is None or day <= subscription["period_to"]))
 
-    def subscribe(self, user_id: str, city: str, category: str) -> Dict[str, Any]:
+    def subscribe(self, user_id: str, city: str, category: str, period=None,
+                  replace_subscription_id: str | None = None) -> Dict[str, Any]:
         user_id_str = self._user_id(user_id)
         city_clean = self._label(city, "Все города", 120)
         cat_clean = self._label(category, "Все категории", 100).lower()
+        start = period.get("date_from") if isinstance(period, dict) else getattr(period, "date_from", None)
+        end = period.get("date_to") if isinstance(period, dict) else getattr(period, "date_to", None)
+        if start is not None and not isinstance(start, date) or end is not None and not isinstance(end, date):
+            raise ValueError("Некорректный период событий")
+        if start and end and start > end:
+            raise ValueError("Начало периода позже окончания")
+        period_from = start.isoformat() if start else None
+        period_to = end.isoformat() if end else None
 
         now = datetime.now(timezone.utc)
         expires = now + timedelta(days=self.retention_days)
 
+        if replace_subscription_id is not None:
+            target = self.db.fetchone("SELECT * FROM subscriptions WHERE id = ? AND user_id = ?",
+                                      (replace_subscription_id, user_id_str))
+            if target is None:
+                raise LookupError("Subscription not found")
+            duplicate = self.find_subscription(user_id_str, city_clean, cat_clean)
+            if duplicate and duplicate["id"] != target["id"]:
+                raise ValueError("Subscription with these filters already exists")
+            self.db.execute("""UPDATE subscriptions SET city = ?, category = ?, period_from = ?,
+                           period_to = ?, expires_at = ? WHERE id = ? AND user_id = ?""",
+                           (city_clean, cat_clean, period_from, period_to, expires.isoformat(),
+                            target["id"], user_id_str))
+            return {"id": target["id"], "user_id": user_id_str, "city": city_clean,
+                    "category": cat_clean, "created_at": target["created_at"],
+                    "expires_at": expires.isoformat(), "is_new": False,
+                    "period_from": period_from, "period_to": period_to}
+
         existing = self.find_subscription(user_id_str, city_clean, cat_clean)
         if existing:
             self.db.execute(
-                "UPDATE subscriptions SET expires_at = ? WHERE id = ?",
-                (expires.isoformat(), existing["id"]),
+                "UPDATE subscriptions SET expires_at = ?, period_from = ?, period_to = ? WHERE id = ?",
+                (expires.isoformat(), period_from, period_to, existing["id"]),
             )
             return {
                 "id": existing["id"],
@@ -69,15 +103,17 @@ class SubscriptionService:
                 "created_at": existing["created_at"],
                 "expires_at": expires.isoformat(),
                 "is_new": False,
+                "period_from": period_from,
+                "period_to": period_to,
             }
 
         sub_id = str(uuid.uuid4())
         self.db.execute(
             """
-            INSERT INTO subscriptions (id, user_id, city, category, created_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO subscriptions (id, user_id, city, category, created_at, expires_at, period_from, period_to)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (sub_id, user_id_str, city_clean, cat_clean, now.isoformat(), expires.isoformat()),
+            (sub_id, user_id_str, city_clean, cat_clean, now.isoformat(), expires.isoformat(), period_from, period_to),
         )
         return {
             "id": sub_id,
@@ -87,6 +123,8 @@ class SubscriptionService:
             "created_at": now.isoformat(),
             "expires_at": expires.isoformat(),
             "is_new": True,
+            "period_from": period_from,
+            "period_to": period_to,
         }
 
     def toggle_subscription(self, user_id: str, city: str, category: str) -> Dict[str, Any]:

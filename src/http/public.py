@@ -120,7 +120,8 @@ def create_public_router(database: Database, settings: Settings | None = None) -
 
     @router.post("/api/v1/subscriptions", status_code=201)
     def create_subscription(data: SubscriptionInput):
-        return run_service(subscriptions.subscribe, data.subscriber_id, data.city, data.category)
+        return run_service(subscriptions.subscribe, data.subscriber_id, data.city, data.category,
+                           period=data.period)
 
     @router.delete("/api/v1/subscriptions/{subscription_id}")
     def delete_subscription(subscription_id: str, subscriber_id: str = Query(min_length=1, max_length=128)):

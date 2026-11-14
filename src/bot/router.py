@@ -94,6 +94,7 @@ class BotRouter:
         self._awaiting_custom_date.pop(uid, None)
         if uid in self._agent_conversations:
             self._manually_edited_filters.add(uid)
+            self._sync_manual_filters_to_agent(uid, self._agent_conversations[uid])
         return self._user_filters[uid]
 
     def is_admin(self, user_id: str) -> bool:
@@ -186,19 +187,15 @@ class BotRouter:
             if value:
                 day = str(value)[:10]
                 setattr(filters, field, day + suffix)
-        try:
-            parsed = parse_free_text_query(text, ref_date=self.settings.get_reference_date(), db=self.db)
-        except ValueError:
-            parsed = SearchFilters()
-        if (parsed.date_preset and parsed.date_from == filters.date_from
-                and parsed.date_to == filters.date_to):
-            filters.date_preset = parsed.date_preset
+        for preset in ("weekend", "today", "tomorrow", "week", "next_week", "month",
+                       "friday", "saturday", "sunday"):
+            start, end = resolve_date_preset(preset, self.settings.get_reference_date())
+            if (start, end) == (filters.date_from, filters.date_to):
+                filters.date_preset = preset
+                break
         tool_text = str(args.get("text") or "")
-        if tool_text:
-            # A model may forward the whole question. Keep only its remaining
-            # search terms so changing the city or date does not retain old ones.
-            filters.query_text = (parsed.query_text if normalize_text(tool_text) == normalize_text(text)
-                                  else scrub_pii(tool_text)[:200])
+        if tool_text and normalize_text(tool_text) != normalize_text(text):
+            filters.query_text = scrub_pii(tool_text)[:200]
         self._user_filters[uid] = filters
         self._manually_edited_filters.discard(uid)
         return True
@@ -229,6 +226,7 @@ class BotRouter:
     def _search_after_filter_change(self, uid: str) -> BotResponse:
         if uid in self._agent_conversations:
             self._manually_edited_filters.add(uid)
+            self._sync_manual_filters_to_agent(uid, self._agent_conversations[uid])
         return self._execute_search_response(uid)
 
     def _recommend_response(self, uid: str) -> BotResponse:
@@ -247,9 +245,7 @@ class BotRouter:
     def _handle_agent_query(self, uid: str, text: str) -> BotResponse:
         """Run a free-form query through the shared agent service.
 
-        In deterministic no-ai mode the legacy rich filter renderer remains the
-        presentation fallback, while the same request is still persisted and
-        traced by the agent pipeline.
+        Search state comes from the executed tool call and persisted dialogue.
         """
         try:
             _, conversation_id = self.agent_service.get_or_create_principal(f"telegram:{uid}")
@@ -260,29 +256,10 @@ class BotRouter:
                 user_id=f"telegram:{uid}",
             )
             self._agent_conversations[uid] = conversation_id
-        except Exception as exc:
-            if self.settings.ai_mode != "no-ai":
-                raise
-            # In no-ai mode search must remain usable if agent persistence is unavailable.
-            log_event(self.logger, logging.ERROR, "Agent persistence unavailable; using catalog search",
-                      user_id=uid, error_type=type(exc).__name__)
-            result = None
+        except Exception:
+            raise
         trace = (self.agent_service.get_trace(result.request_id)
                  if result is not None and result.status in {"ok", "fallback", "no_data"} else None)
-        if self.settings.ai_mode == "no-ai" and (
-                result is None or (result.status in {"ok", "fallback", "no_data"}
-                                   and not (trace and trace.routing_features.intent == "planner"))):
-            parsed_filters = parse_free_text_query(
-                text,
-                ref_date=self.settings.get_reference_date(),
-                db=self.db,
-            )
-            if parsed_filters.is_empty():
-                parsed_filters.query_text = scrub_pii(text)[:200]
-            elif parsed_filters.query_text:
-                parsed_filters.query_text = scrub_pii(parsed_filters.query_text)[:200]
-            self._user_filters[uid] = parsed_filters
-            return self._execute_search_response(uid)
         remembered = False
         if trace:
             remembered = self._remember_agent_search_filters(uid, text, trace.tool_calls)

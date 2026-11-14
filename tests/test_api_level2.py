@@ -140,6 +140,14 @@ def test_versioned_feedback_and_subscriptions(client, catalog):
     sub_id = created.json()['id']
     listed = client.get('/api/v1/subscriptions', params={'subscriber_id': 'browser-test'})
     assert listed.status_code == 200 and [s['id'] for s in listed.json()] == [sub_id]
+    invalid = client.post('/api/v1/subscriptions', json={**payload, 'period': {
+        'date_from': '2026-12-02', 'date_to': '2026-12-01'}})
+    assert invalid.status_code == 422
+    updated = client.post('/api/v1/subscriptions', json={**payload, 'period': {
+        'date_from': '2026-11-20', 'date_to': '2026-11-30'}})
+    assert updated.status_code == 201 and not updated.json()['is_new']
+    assert updated.json()['period_from'] == '2026-11-20'
+    assert updated.json()['expires_at'] != updated.json()['period_to']
     assert client.delete(f'/api/v1/subscriptions/{sub_id}', params={'subscriber_id': 'someone-else'}).status_code == 404
     assert client.delete(f'/api/v1/subscriptions/{sub_id}', params={'subscriber_id': 'browser-test'}).json() == {'deleted': 1}
     client.post('/api/v1/subscriptions', json=payload)

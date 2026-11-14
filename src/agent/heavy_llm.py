@@ -420,7 +420,7 @@ class HeavyLLMProvider:
                     decision, parsed = self.registry.policy.check_tool(
                         proposed.name, arguments, calls_used=context.calls_used - 1, confirmed=True)
                     if decision.decision == PolicyDecision.ALLOWED and parsed is not None:
-                        pending = ToolCall(name=proposed.name, arguments=parsed.model_dump(mode="json"))
+                        pending = ToolCall(name=proposed.name, arguments=parsed.model_dump(mode="json", exclude_none=True))
                     return done(fallback, "confirmation_required")
                 if result.error is None:
                     if not self.registry.metadata()[proposed.name].state_changing:

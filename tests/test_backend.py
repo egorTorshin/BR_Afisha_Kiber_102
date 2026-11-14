@@ -231,53 +231,56 @@ def insert_legacy(db, item, *, event_id, raw_id):
     db.execute("INSERT INTO events (" + ", ".join(norm) + ") VALUES (" + ", ".join("?" for _ in norm) + ")", tuple(norm.values()))
 
 
-def apply_001(db, tmp_path):
-    (tmp_path / "001_initial_schema.sql").write_bytes((MIGRATIONS / "001_initial_schema.sql").read_bytes())
-    assert apply_migrations(db, tmp_path) == 1
+def _columns(db, table):
+    if db.is_postgres:
+        return {row["column_name"] for row in db.fetchall(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ?",
+            (table,))}
+    return {row["name"] for row in db.fetchall(f"PRAGMA table_info({table})")}
 
 
-def test_upgrade_existing_database_preserves_data_sources_and_ids(empty_db, tmp_path):
+def _table_exists(db, table):
+    if db.is_postgres:
+        return bool(db.fetchone("SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename = ?", (table,)))
+    return bool(db.fetchone("SELECT name FROM sqlite_master WHERE name = ?", (table,)))
+
+
+def test_fresh_baseline_is_atomic_and_repeatable(empty_db, tmp_path):
     db = empty_db
-    apply_001(db, tmp_path)
-    insert_legacy(db, event(), event_id="legacy_one", raw_id="raw_one")
-    insert_legacy(db, event(source_url="https://example.com/two", status="черновик"), event_id="legacy_two", raw_id="raw_two")
-    insert_legacy(db, event(title="Бесплатный вход", price_min=0), event_id="legacy_free", raw_id="raw_free")
-    assert apply_migrations(db, MIGRATIONS) == len(list(MIGRATIONS.glob('*.sql'))) - 1
+    assert apply_migrations(db, MIGRATIONS) == 1
     assert apply_migrations(db, MIGRATIONS) == 0
-    assert len(db.fetchall("SELECT * FROM events")) == 3  # Old snapshots and IDs retained.
-    assert len(db.fetchall("SELECT * FROM events WHERE merged_into IS NULL")) == 2
-    assert len(db.fetchall("SELECT * FROM event_sources WHERE event_id = 'legacy_one'")) == 2
-    row = db.fetchone("SELECT * FROM events WHERE id = 'legacy_one'")
-    assert row["price_min"] is None and row["price_max"] is None and not row["is_free"]
-    assert row["status"] == "draft"  # Never publish a draft by merging it.
-    assert db.fetchone("SELECT is_free FROM events WHERE id = 'legacy_free'")["is_free"] == 1
-    search = SearchService(db)
-    assert search.get_event_by_id("legacy_two") is None
-    assert search.get_event_by_id("legacy_two", include_drafts=True).id == "legacy_one"
-    report = ImportService(db).import_records([event(), event(source_url="https://example.com/two")], "repeat")
-    assert report.added_count == report.rejected_count == 0
-    assert len(db.fetchall("SELECT * FROM raw_events")) == 3
+    assert db.fetchone("SELECT version FROM schema_migrations")["version"] == "001_baseline.sql"
+    columns = _columns(db, "bot_profiles")
+    assert "phone" not in columns
+    assert {"period_from", "period_to"}.issubset(_columns(db, "subscriptions"))
 
 
-def test_failed_migration_is_atomic(empty_db, tmp_path, monkeypatch):
-    import src.db.migrations as migrations
+def test_legacy_history_refused_without_data_loss(empty_db):
     db = empty_db
-    apply_001(db, tmp_path)
-    insert_legacy(db, event(), event_id="old", raw_id="raw")
-    original = migrations._backfill_admin_data
-
-    def fail(database):
-        original(database)
-        raise RuntimeError("simulated interruption")
-
-    monkeypatch.setattr(migrations, "_backfill_admin_data", fail)
-    with pytest.raises(RuntimeError, match="simulated interruption"):
+    db.execute("CREATE TABLE preserved (id TEXT PRIMARY KEY)")
+    db.execute("INSERT INTO preserved VALUES ('keep')")
+    with pytest.raises(RuntimeError, match="Existing database"):
         apply_migrations(db, MIGRATIONS)
-    assert len(db.fetchall("SELECT * FROM schema_migrations")) == 1
-    assert db.fetchone("SELECT price_min, status FROM events WHERE id = 'old'") == {"price_min": 0, "status": "опубликовано"}
-    monkeypatch.setattr(migrations, "_backfill_admin_data", original)
-    assert apply_migrations(db, MIGRATIONS) == len(list(MIGRATIONS.glob('*.sql'))) - 1
+    assert db.fetchone("SELECT id FROM preserved")["id"] == "keep"
+    assert not _table_exists(db, "events")
 
+
+def test_legacy_006_marker_does_not_replay_baseline(db):
+    _, record = ImportService(db).create_event_manual(event())
+    db.execute("UPDATE schema_migrations SET version = '006_unified_users.sql'")
+    with pytest.raises(RuntimeError, match="Legacy migration history"):
+        apply_migrations(db, MIGRATIONS)
+    assert db.fetchone("SELECT id FROM events WHERE id = ?", (record.id,))["id"] == record.id
+    assert db.fetchone("SELECT version FROM schema_migrations")["version"] == "006_unified_users.sql"
+
+
+def test_failed_baseline_is_atomic(empty_db, tmp_path):
+    db = empty_db
+    (tmp_path / "001_baseline.sql").write_text(
+        "CREATE TABLE transient (id TEXT); INVALID SQL;", encoding="utf-8")
+    with pytest.raises(Exception):
+        apply_migrations(db, tmp_path)
+    assert not _table_exists(db, "transient")
 
 
 def test_concurrent_import_is_idempotent(db):
@@ -380,24 +383,6 @@ def test_cli_missing_price_is_unknown(db, monkeypatch, capsys):
     assert cli.main() == 0
     assert "Стоимость уточняется" in capsys.readouterr().out
     assert db.fetchone("SELECT price_min FROM events")["price_min"] is None
-
-
-def test_upgrade_recovers_overwritten_source_from_raw(empty_db, tmp_path):
-    db = empty_db
-    apply_001(db, tmp_path)
-    insert_legacy(db, event(), event_id="legacy", raw_id="raw_one")
-    second = event(source_url="https://example.com/two")
-    source_hash = ImportService(db)._validate_and_normalize(second)["source_hash"]
-    db.execute("INSERT INTO raw_events (id, source_type, source_name, source_hash, raw_payload_json, ingested_at) VALUES (?, ?, ?, ?, ?, ?)",
-               ("raw_two", "импорт", "legacy", source_hash, json.dumps(second), "2026-01-02"))
-    # The old UPDATE replaced the URL/raw pointer but retained the original hash.
-    db.execute("UPDATE events SET source_url = ?, raw_event_id = ?", (second["source_url"], "raw_two"))
-    apply_migrations(db, MIGRATIONS)
-    sources = ImportService(db).list_sources("legacy")
-    assert {source.source_url for source in sources} == {event()["source_url"], second["source_url"]}
-    assert len(db.fetchall("SELECT * FROM events")) == 1
-    assert ImportService(db).import_records([event(), second], "repeat").added_count == 0
-    assert db.fetchone("SELECT source_hash FROM events")["source_hash"] == source_hash
 
 
 def test_moderation_rolls_back_on_audit_failure(db, monkeypatch):

@@ -65,17 +65,16 @@ def main_menu_keyboard(
     subs_count: int = 0,
     language: str = "ru",
 ) -> Dict[str, Any]:
-    return {"inline_keyboard": [
-        [{"text": f"🔎 Показать события ({matching_count})" if matching_count is not None else "🔎 Показать события",
-          "callback_data": "search:run"},
+    rows = [
+        [{"text": "🔎 События", "callback_data": "search:run"},
          {"text": "⚙️ Фильтры", "callback_data": "menu:filters"}],
-        [{"text": "✨ Для вас", "callback_data": "preset:for_you"},
-         {"text": "🔥 Выходные", "callback_data": "preset:weekend"}],
-        [{"text": "🆓 Бесплатно", "callback_data": "price:free"},
-         {"text": "🧒 Детям", "callback_data": "preset:kids"}],
-        [{"text": f"🔔 Подписки ({subs_count})", "callback_data": "menu:subs"},
-         {"text": "🌐 Язык / 📍 Гео", "callback_data": "profile:open"}],
-    ]}
+        [{"text": "🌐 Язык / 📍 Гео", "callback_data": "profile:open"},
+         {"text": "🔔 Подписки", "callback_data": "menu:subs"}],
+        [{"text": "✨ Для вас", "callback_data": "preset:for_you"}],
+    ]
+    if filters is not None and not filters.is_empty():
+        rows[-1].append({"text": "🔄 Сбросить фильтры", "callback_data": "menu:reset"})
+    return {"inline_keyboard": rows}
 
 
 def filters_keyboard(filters: SearchFilters) -> Dict[str, Any]:

@@ -18,6 +18,14 @@ class SubscriptionInput(BaseModel):
     subscriber_id: str = Field(min_length=1, max_length=128)
     city: str = Field(min_length=1, max_length=120)
     category: str = Field(min_length=1, max_length=100)
+    period: Optional[dict[Literal["date_from", "date_to"], date]] = None
+
+    @model_validator(mode="after")
+    def validate_subscription_period(self):
+        if self.period and self.period.get("date_from") and self.period.get("date_to"):
+            if self.period["date_from"] > self.period["date_to"]:
+                raise ValueError("Начало периода позже окончания")
+        return self
 
 
 class LoginInput(BaseModel):

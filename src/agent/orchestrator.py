@@ -51,7 +51,11 @@ def _confirmation_message(call: ToolCall) -> str:
     if call.name == "subscribe":
         city = str(call.arguments.get("city", ""))[:120]
         category = str(call.arguments.get("category", ""))[:120]
-        return f"Подтвердите подписку: {city}, {category}. Ответьте «да» или «нет»."
+        period = call.arguments.get("period") or {}
+        dates = (f"; события с {period.get('date_from') or 'любой даты'}"
+                 f" по {period.get('date_to') or 'любую дату'}") if period else ""
+        action = "изменение подписки" if call.arguments.get("replace_subscription_id") else "подписку"
+        return f"Подтвердите {action}: {city}, {category}{dates}. Ответьте «да» или «нет»."
     if call.name == "save_feedback":
         return "Подтвердите отправку отзыва модератору: ответьте «да» или «нет»."
     return "Подтвердите действие: ответьте «да» или «нет»."
@@ -291,34 +295,138 @@ class AgentOrchestrator:
                     else:
                         fallback_reason = heavy.stop_reason
                 if fallback_reason and stop not in {"clarification", "confirmation_required"}:
-                    if (features.intent == "other" and not any(context.security_flags.model_dump().values())
-                            and re.search(r"не знаю|не уверен|без разницы|куда-нибудь", normalized)):
+                    if any(context.security_flags.model_dump().values()):
+                        stop, message = "model_unavailable", "Не могу надёжно обработать этот запрос. Уточните запрос о событии."
+                    elif features.intent == "other" and not (state.pending_clarification and
+                            re.fullmatch(r"\s*\d{1,2}[. ]\d{1,2}(?:[. ]\d{4})?\s*", request.message)):
                         stop, message = "clarification", "Уточните, пожалуйста, город, дату или интересующий вид мероприятия."
-                    elif features.intent == "search_events" and not any(context.security_flags.model_dump().values()):
+                    elif features.intent in {"subscribe", "save_feedback"}:
+                        parsed = parse_free_text_query(request.message,
+                            ref_date=self.settings.get_reference_date(), db=getattr(self.search, "db", None))
+                        if features.intent == "subscribe":
+                            city = parsed.city or state.active_constraints.city
+                            category = parsed.category or state.active_constraints.category
+                            replacing = bool(re.search(r"\b(?:перенеси|измени|смени|сменить|изменить)\b", normalized))
+                            existing_subs = (self.registry.subscription_service.list_subscriptions(self.registry.user_id)
+                                             if replacing else [])
+                            if replacing and len(existing_subs) == 1:
+                                category = category or existing_subs[0]["category"]
+                            if not city or not category:
+                                stop, message = "clarification", "Укажите город и категорию для подписки."
+                            elif replacing and len(existing_subs) != 1:
+                                stop, message = "clarification", "Уточните, какую подписку изменить: укажите её город и категорию."
+                            else:
+                                arguments = {"city": city, "category": category}
+                                if replacing:
+                                    arguments["replace_subscription_id"] = existing_subs[0]["id"]
+                                if parsed.date_from or parsed.date_to:
+                                    arguments["period"] = {"date_from": parsed.date_from[:10] if parsed.date_from else None,
+                                                           "date_to": parsed.date_to[:10] if parsed.date_to else None}
+                                state.pending_confirmation = ToolCall(name="subscribe", arguments=arguments)
+                                stop, message = "confirmation_required", _confirmation_message(state.pending_confirmation)
+                        else:
+                            feedback = re.sub(r"^(?:оставь|оставить|отправь|отправить|напиши)\s+(?:отзыв|жалобу)\s*[:—-]?\s*", "", request.message, flags=re.I).strip()
+                            if not feedback or (feedback == request.message and len(feedback.split()) < 4):
+                                stop, message = "clarification", "Напишите текст отзыва, который нужно отправить."
+                            else:
+                                state.pending_confirmation = ToolCall(name="save_feedback", arguments={"message": feedback})
+                                stop, message = "confirmation_required", _confirmation_message(state.pending_confirmation)
+                    elif features.intent == "event_status":
+                        parsed = parse_free_text_query(request.message,
+                            ref_date=self.settings.get_reference_date(), db=getattr(self.search, "db", None))
+                        if not parsed.date_from:
+                            stop, message = "clarification", "Уточните дату события."
+                        else:
+                            clauses = ["date_start >= ?", "date_start <= ?", "merged_into IS NULL", "status IN ('published', 'cancelled')"]
+                            params = [parsed.date_from, parsed.date_to]
+                            if parsed.category:
+                                clauses.append("category = ?")
+                                params.append(parsed.category)
+                            if parsed.city:
+                                clauses.append("city = ?")
+                                params.append(parsed.city)
+                            rows = self.search.db.fetchall("SELECT id, title FROM events WHERE " + " AND ".join(clauses) + " ORDER BY id LIMIT 100", tuple(params))
+                            if parsed.query_text:
+                                from src.services.normalizer import normalize_text
+                                words = normalize_text(parsed.query_text).split()
+                                rows = [row for row in rows if all(word in normalize_text(row["title"]) for word in words)]
+                            if len(rows) == 1:
+                                result = execute(ToolCall(name="get_event", arguments={"event_id": rows[0]["id"]}))
+                                if result.error is None:
+                                    event = result.payload["event"]
+                                    status = "отменено" if event["status"] == "cancelled" else "опубликовано"
+                                    message = f"Событие «{event['title']}» {event['date_start'][:10]}: {status}. Источник: {event['source_url']}"
+                                    stop = "completed"
+                                else:
+                                    stop, message = "no_data", "Не удалось проверить статус события."
+                            elif rows:
+                                stop, message = "clarification", "На эту дату найдено несколько событий. Уточните название или площадку."
+                            else:
+                                stop, message = "no_data", "Подходящее событие в каталоге не найдено; подтвердить отмену не могу."
+                    elif features.intent == "find_similar":
+                        if not state.last_result_ids:
+                            stop, message = "clarification", "Укажите событие, для которого искать похожие."
+                        else:
+                            args = {"event_id": state.last_result_ids[0], "limit": 5}
+                            if state.active_constraints.city:
+                                args["city"] = state.active_constraints.city
+                            result = execute(ToolCall(name="find_similar", arguments=args))
+                            basis = result.result_ids if result.error is None else []
+                            stop = "fallback_search" if basis else "no_data"
+                            if not basis:
+                                message = "Похожих опубликованных событий по заданным условиям не найдено."
+                    elif features.intent == "get_venue_schedule":
+                        from src.services.normalizer import normalize_text
+                        parsed = parse_free_text_query(request.message,
+                            ref_date=self.settings.get_reference_date(), db=getattr(self.search, "db", None))
+                        names = [row["name"] for row in self.search.db.fetchall("SELECT name FROM venues")]
+                        matches = [name for name in names if normalize_text(name) in normalize_text(request.message)]
+                        if len(matches) != 1 or not parsed.date_from or not parsed.date_to:
+                            stop, message = "clarification", "Укажите точное название площадки и период расписания."
+                        else:
+                            args = {"venue": matches[0], "date_from": parsed.date_from[:10],
+                                    "date_to": parsed.date_to[:10]}
+                            if parsed.city:
+                                args["city"] = parsed.city
+                            result = execute(ToolCall(name="get_venue_schedule", arguments=args))
+                            basis = result.result_ids if result.error is None else []
+                            stop = "fallback_search" if basis else "no_data"
+                            if not basis:
+                                message = "На этой площадке в указанный период опубликованных событий не найдено."
+                    elif features.intent == "search_events" or (state.pending_clarification and
+                            re.fullmatch(r"\s*\d{1,2}[. ]\d{1,2}(?:[. ]\d{4})?\s*", request.message)):
                         try:
                             filters = parse_free_text_query(request.message,
                                 ref_date=self.settings.get_reference_date(), db=getattr(self.search, "db", None))
-                            merged = state.active_constraints.model_dump(mode="json", exclude_none=True)
+                            merged = (state.active_constraints.model_dump(mode="json", exclude_none=True)
+                                      if features.requires_dialogue_context or state.pending_clarification else {})
                             for key in ConstraintSet.model_fields:
                                 value = getattr(filters, key, None)
                                 if value is not None and value is not False:
                                     merged[key] = value[:10] if key in {"date_from", "date_to"} else value
-                            constraints = ConstraintSet.model_validate(merged)
-                            args = constraints.model_dump(mode="json", exclude_none=True)
-                            if getattr(filters, "query_text", None):
-                                args["text"] = filters.query_text[:500]
-                            args["offset"] = state.next_search_offset if normalized in {"а еще", "а ещё"} else 0
-                            search_call = ToolCall(name="search_events", arguments=args)
-                            result = execute(search_call)
-                            if result.error is None:
-                                basis = result.result_ids
-                                stop = "fallback_search"
+                            if re.search(r"\b(?:подешевле|дешевле)\b", normalized) and not filters.is_free_only:
+                                current = state.active_constraints.max_price
+                                merged["max_price"] = min(500, max(0, current - 1)) if current is not None else 500
+                            if normalized in {"в другой день", "на другой день"}:
+                                stop, message = "clarification", "На какую дату перенести поиск?"
+                                state.pending_clarification = message
                             else:
-                                stop = result.error.code
+                                constraints = ConstraintSet.model_validate(merged)
+                                args = constraints.model_dump(mode="json", exclude_none=True)
+                                if getattr(filters, "query_text", None) and not features.requires_dialogue_context:
+                                    args["text"] = filters.query_text[:500]
+                                args["offset"] = state.next_search_offset if normalized in {"а еще", "а ещё"} else 0
+                                search_call = ToolCall(name="search_events", arguments=args)
+                                result = execute(search_call)
+                                if result.error is None:
+                                    basis = result.result_ids
+                                    stop = "fallback_search" if basis else "no_data"
+                                else:
+                                    stop = result.error.code
                         except (ValueError, TypeError):
                             stop = "fallback_unavailable"
                     else:
-                        stop = "model_unavailable"
+                        stop, message = "model_unavailable", "Недостаточно данных для ответа. Уточните событие или запрос."
 
             # Only IDs returned by successful tools in this request may be rendered.
             observed = {event_id for group in tool_ids for event_id in group}
@@ -340,7 +448,7 @@ class AgentOrchestrator:
                 stop, message = "no_data", "Данные о найденных событиях недоступны."
             elif search_call and not cards and stop == "completed":
                 stop, message = "no_data", last_search_explanation or "По вашему запросу событий не найдено. Попробуйте расширить период или убрать фильтр города."
-            elif not cards and stop in {"fallback_search", "no_data"} and heavy_result_kind is None and not planner_handled:
+            elif search_call and not cards and stop in {"fallback_search", "no_data"} and heavy_result_kind is None and not planner_handled:
                 message = last_search_explanation or "По вашему запросу событий не найдено. Попробуйте расширить период или убрать фильтр города."
             elif cards:
                 if heavy_result_kind != "recommendation" and not planner_handled:

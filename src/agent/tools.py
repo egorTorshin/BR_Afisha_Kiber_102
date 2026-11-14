@@ -113,8 +113,9 @@ class GetEventOutput(ContractModel):
     event: EventCard
 
 
-class FindSimilarInput(ContractModel):
+class FindSimilarInput(PeriodInput):
     event_id: StrictStr = Field(min_length=1, max_length=128)
+    city: StrictStr | None = Field(default=None, min_length=1, max_length=120)
     limit: StrictInt = Field(default=5, ge=1, le=20)
 
 
@@ -143,6 +144,8 @@ class GetVenueScheduleOutput(ContractModel):
 class SubscribeInput(ContractModel):
     city: StrictStr = Field(min_length=1, max_length=120)
     category: StrictStr = Field(min_length=1, max_length=120)
+    period: PeriodInput | None = None
+    replace_subscription_id: StrictStr | None = Field(default=None, min_length=1, max_length=128)
 
 
 class SubscribeOutput(ContractModel):
@@ -152,6 +155,7 @@ class SubscribeOutput(ContractModel):
     created_at: str
     expires_at: str
     is_new: bool
+    period: PeriodInput | None = None
 
 
 class SaveFeedbackInput(ContractModel):
@@ -303,7 +307,10 @@ def create_tool_registry(
         source = search.get_event_by_id(args.event_id)
         if source is None or source.status != "published":
             raise LookupError("Event not found")
-        recommendations = RecommendationService(search.db).find_similar_hybrid(source.id, limit=args.limit)
+        recommendations = RecommendationService(search.db).find_similar_hybrid(
+            source.id, city=args.city,
+            date_from=args.date_from.isoformat() if args.date_from else None,
+            date_to=args.date_to.isoformat() if args.date_to else None, limit=args.limit)
         return FindSimilarOutput(events=[_summary(item.event) for item in recommendations])
 
     def get_venue_schedule(args: GetVenueScheduleInput) -> GetVenueScheduleOutput:
@@ -323,9 +330,12 @@ def create_tool_registry(
                                       total=len(found))
 
     def subscribe(args: SubscribeInput) -> SubscribeOutput:
-        sub = subscriptions.subscribe(user_id, args.city, args.category)
+        sub = subscriptions.subscribe(user_id, args.city, args.category, period=args.period,
+                                      replace_subscription_id=args.replace_subscription_id)
         return SubscribeOutput(subscription_id=sub["id"], city=sub["city"], category=sub["category"],
-                               created_at=sub["created_at"], expires_at=sub["expires_at"], is_new=sub["is_new"])
+                               created_at=sub["created_at"], expires_at=sub["expires_at"], is_new=sub["is_new"],
+                               period=PeriodInput(date_from=sub["period_from"], date_to=sub["period_to"])
+                               if sub["period_from"] or sub["period_to"] else None)
 
     def save_feedback(args: SaveFeedbackInput) -> SaveFeedbackOutput:
         event_id = args.event_id
@@ -348,5 +358,7 @@ def create_tool_registry(
         ToolDefinition("save_feedback", SaveFeedbackInput, SaveFeedbackOutput, save_feedback, changing),
     ], limits=limits)
     registry.db = search.db
+    registry.subscription_service = subscriptions
+    registry.user_id = user_id
     return registry
 

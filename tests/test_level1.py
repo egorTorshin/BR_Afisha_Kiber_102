@@ -127,14 +127,14 @@ class TestAfishaLevel1(unittest.TestCase):
         # Действие 1: /start
         r1 = self.router.handle_message("user_42", "/start")
         self.assertIn("Афиша культурных мероприятий Башкортостана", r1.text)
-        self.assertIn("Показать события (18)", r1.reply_markup["inline_keyboard"][0][0]["text"])
+        self.assertIn("🔎 События", r1.reply_markup["inline_keyboard"][0][0]["text"])
         self.assertIn("не является официальным сайтом", r1.text)
         menu = r1.reply_markup["inline_keyboard"]
-        self.assertEqual(len(menu), 4)
+        self.assertEqual(len(menu), 3)
         self.assertEqual([button["callback_data"] for button in menu[0]],
                          ["search:run", "menu:filters"])
         self.assertEqual([button["callback_data"] for button in menu[1]],
-                         ["preset:for_you", "preset:weekend"])
+                         ["profile:open", "menu:subs"])
         # Действие 2: сразу открыть выдачу.
         r2 = self.router.handle_callback("user_42", "search:run")
         self.assertIn("Найдено событий", r2.text)
@@ -180,9 +180,8 @@ class TestAfishaLevel1(unittest.TestCase):
         self.assertEqual((natural_filters.city, natural_filters.date_preset, natural_filters.max_age_limit),
                          ("Уфа", "weekend", 6))
         self.assertIsNone(natural_filters.query_text)
-        with patch.object(self.router.agent_service, "get_or_create_principal", side_effect=RuntimeError("agent DB unavailable")):
-            natural_response = self.router.handle_message("user_natural", natural_query)
-        self.assertIn("Найдено событий", natural_response.text)
+        natural_response = self.router.handle_message("user_natural", natural_query)
+        self.assertIn("Подобрал события", natural_response.text)
         self.assertEqual(self.router.get_user_filters("user_natural").city, "Уфа")
         self.assertIn("Уфа", self.router.handle_callback("user_natural", "menu:filters").text)
         self.router.handle_callback("user_natural", "city:Стерлитамак")
@@ -250,7 +249,7 @@ class TestAfishaLevel1(unittest.TestCase):
 
         r_start = self.router.handle_message("user_99", "/start")
         self.assertIn("Подходящих событий в базе: <b>18</b>", r_start.text)
-        self.assertIn("Показать события (18)", r_start.reply_markup["inline_keyboard"][0][0]["text"])
+        self.assertIn("🔎 События", r_start.reply_markup["inline_keyboard"][0][0]["text"])
         profile = self.router.handle_callback("user_99", "profile:open")
         self.assertEqual([button["callback_data"] for button in profile.reply_markup["inline_keyboard"][0]],
                          ["profile_lang:ru", "profile_lang:ba", "profile_lang:en"])
@@ -360,11 +359,12 @@ class TestAfishaLevel1(unittest.TestCase):
     def test_11_manual_filter_edit_reaches_next_agent_turn(self) -> None:
         uid = "user_followup"
         first = self.router.handle_message(uid, "Концерт в Уфе на выходных")
-        self.assertIn("Найдено событий", first.text)
+        self.assertIn("Подобрал события", first.text)
         conversation_id = self.router._agent_conversations[uid]
 
         self.router.handle_callback(uid, "city:Стерлитамак")
-        self.assertIn(uid, self.router._manually_edited_filters)
+        self.assertEqual(self.router.agent_service.dialogue_repo.get(conversation_id).active_constraints.city,
+                         "Стерлитамак")
 
         def check_synced_state(*args, **kwargs):
             state = self.router.agent_service.dialogue_repo.get(conversation_id)
@@ -378,6 +378,73 @@ class TestAfishaLevel1(unittest.TestCase):
         with patch.object(self.router.agent_service, "chat", side_effect=check_synced_state):
             self.router.handle_message(uid, "А ещё вечером?")
         self.assertNotIn(uid, self.router._manually_edited_filters)
+
+    def test_12_menu_and_reset_clear_agent_constraints(self) -> None:
+        uid = "reset-dialogue"
+        menu = self.router.handle_message(uid, "/start").reply_markup["inline_keyboard"]
+        self.assertEqual([[button["text"] for button in row] for row in menu], [
+            ["🔎 События", "⚙️ Фильтры"],
+            ["🌐 Язык / 📍 Гео", "🔔 Подписки"],
+            ["✨ Для вас"],
+        ])
+        self.router.handle_message(uid, "Концерт в Уфе на выходных")
+        active = self.router.handle_callback(uid, "menu:main").reply_markup["inline_keyboard"]
+        self.assertEqual(active[-1][-1]["text"], "🔄 Сбросить фильтры")
+        self.router.handle_callback(uid, "menu:reset")
+        cid = self.router._agent_conversations[uid]
+        state = self.router.agent_service.dialogue_repo.get(cid)
+        self.assertIsNone(state.active_constraints.city)
+        self.assertIsNone(state.active_constraints.date_from)
+        self.assertTrue(self.router.get_user_filters(uid).is_empty())
+
+    def test_13_no_ai_relative_followups_and_cancelled_status(self) -> None:
+        uid = "relative-dialogue"
+        self.router.handle_message(uid, "Концерт в Уфе 14 ноября до 1500 рублей")
+        cid = self.router._agent_conversations[uid]
+        self.router.handle_message(uid, "подешевле")
+        state = self.router.agent_service.dialogue_repo.get(cid)
+        self.assertEqual(state.active_constraints.city, "Уфа")
+        self.assertLess(state.active_constraints.max_price, 1500)
+        self.router.handle_message(uid, "только бесплатные")
+        state = self.router.agent_service.dialogue_repo.get(cid)
+        self.assertTrue(state.active_constraints.is_free_only)
+        self.assertEqual(state.active_constraints.city, "Уфа")
+        other_day = self.router.handle_message(uid, "в другой день")
+        self.assertIn("На какую дату", other_day.text)
+        self.router.handle_message(uid, "15.11.2026")
+        state = self.router.agent_service.dialogue_repo.get(cid)
+        self.assertEqual(state.active_constraints.date_from.isoformat(), "2026-11-15")
+        self.router.handle_message(uid, "а ещё")
+        state = self.router.agent_service.dialogue_repo.get(cid)
+        self.assertEqual(state.active_constraints.city, "Уфа")
+        self.assertTrue(state.active_constraints.is_free_only)
+
+        status = self.router.handle_message("cancel-check", "Отменили ли спектакль 14 ноября?")
+        self.assertIn("Уточните название", status.text)
+        self.assertNotIn("Подобрал события", status.text)
+        named = self.router.handle_message("cancel-check", "Отменили ли спектакль Ревизор 14 ноября?")
+        self.assertIn("отменено", named.text.lower())
+        self.assertIn("Источник:", named.text)
+
+    def test_14_no_ai_subscription_confirmation_is_once(self) -> None:
+        uid = "agent-subscription"
+        proposed = self.router.handle_message(uid, "Подпиши на концерты в Уфе")
+        self.assertIn("Подтвердите подписку", proposed.text)
+        self.assertEqual(self.sub_service.list_subscriptions(f"telegram:{uid}"), [])
+        confirmed = self.router.handle_message(uid, "да")
+        self.assertIn("Действие выполнено", confirmed.text)
+        self.assertEqual(len(self.sub_service.list_subscriptions(f"telegram:{uid}")), 1)
+        self.router.handle_message(uid, "да")
+        self.assertEqual(len(self.sub_service.list_subscriptions(f"telegram:{uid}")), 1)
+        change = self.router.handle_message(uid, "Перенеси подписку в Стерлитамак")
+        self.assertIn("Подтвердите изменение подписки", change.text)
+        self.assertEqual(self.sub_service.list_subscriptions(f"telegram:{uid}")[0]["city"], "Уфа")
+        self.router.handle_message(uid, "да")
+        subs = self.sub_service.list_subscriptions(f"telegram:{uid}")
+        self.assertEqual(len(subs), 1)
+        self.assertEqual(subs[0]["city"], "Стерлитамак")
+        self.router.handle_message(uid, "да")
+        self.assertEqual(len(self.sub_service.list_subscriptions(f"telegram:{uid}")), 1)
 
 
 if __name__ == "__main__":

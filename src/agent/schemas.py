@@ -69,7 +69,7 @@ class RoutingFeatures(ContractModel):
 
     intent: Literal[
         "search_events", "get_event", "find_similar", "get_venue_schedule",
-        "subscribe", "save_feedback", "planner", "other",
+        "subscribe", "save_feedback", "planner", "event_status", "other",
     ] = "other"
     constraint_count: int = Field(default=0, ge=0)
     message_length: int = Field(default=0, ge=0)

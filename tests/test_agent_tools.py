@@ -1,6 +1,7 @@
 """Tool boundary integration tests use the real application services and test database."""
 
 import pytest
+from datetime import date
 from pathlib import Path
 
 from src.agent.tools import (
@@ -70,6 +71,10 @@ def test_all_read_tools_success(catalog):
     assert FindSimilarOutput.model_validate(similar.payload).events
     assert similar.result_ids[0] == second.id
     assert first.id not in similar.result_ids and draft.id not in similar.result_ids
+    narrowed = registry.execute("find_similar", {
+        "event_id": first.id, "city": "Уфа", "date_from": "2026-11-21", "date_to": "2026-11-21",
+    })
+    assert narrowed.result_ids == [second.id]
 
     schedule = registry.execute("get_venue_schedule", {
         "venue": "Большой зал", "city": "Уфа", "date_from": "2026-11-20", "date_to": "2026-11-22",
@@ -101,6 +106,29 @@ def test_state_changing_tools_use_trusted_identity(catalog, db):
     assert db.fetchone("SELECT message FROM feedback WHERE id = ?", (record.feedback_id,))["message"] == "Проверьте время"
 
 
+def test_subscription_event_period_requires_confirmation_and_can_change(catalog, db):
+    registry = catalog[0]
+    args = {"city": "Уфа", "category": "концерт",
+            "period": {"date_from": "2026-11-20", "date_to": "2026-11-30"}}
+    assert registry.execute("subscribe", args).error.code == "confirmation_required"
+    assert db.fetchall("SELECT * FROM subscriptions") == []
+    first = registry.execute("subscribe", args, confirmed=True)
+    assert first.error is None and first.payload["period"]["date_from"] == "2026-11-20"
+    assert SubscriptionService(db).is_subscribed("trusted-user", "Уфа", "концерт", date(2026, 11, 25))
+    assert not SubscriptionService(db).is_subscribed("trusted-user", "Уфа", "концерт", date(2026, 12, 1))
+    changed = registry.execute("subscribe", {**args, "period": {"date_from": "2026-12-01"}}, confirmed=True)
+    assert changed.error is None and not changed.payload["is_new"]
+    row = db.fetchone("SELECT period_from, period_to FROM subscriptions WHERE id = ?", (first.payload["subscription_id"],))
+    assert row == {"period_from": "2026-12-01", "period_to": None}
+    move = {"city": "Стерлитамак", "category": "концерт",
+            "replace_subscription_id": first.payload["subscription_id"]}
+    assert registry.execute("subscribe", move).error.code == "confirmation_required"
+    assert db.fetchone("SELECT city FROM subscriptions WHERE id = ?", (first.payload["subscription_id"],))["city"] == "Уфа"
+    moved = registry.execute("subscribe", move, confirmed=True)
+    assert moved.error is None and moved.payload["subscription_id"] == first.payload["subscription_id"]
+    assert db.fetchone("SELECT COUNT(*) AS n FROM subscriptions")["n"] == 1
+
+
 @pytest.mark.parametrize("name,args", [
     ("search_events", {"limit": 0}),
     ("search_events", {"date_from": "2026-11-22", "date_to": "2026-11-20"}),
@@ -108,8 +136,12 @@ def test_state_changing_tools_use_trusted_identity(catalog, db):
     ("search_events", {"is_free_only": "yes"}),
     ("get_event", {}),
     ("find_similar", {"limit": 100}),
+    ("find_similar", {"event_id": "x", "date_from": "2026-11-22", "date_to": "2026-11-20"}),
+    ("find_similar", {"event_id": "x", "city": ""}),
     ("get_venue_schedule", {"venue": "Большой зал"}),
     ("subscribe", {"city": "Уфа"}),
+    ("subscribe", {"city": "Уфа", "category": "концерт", "period": {"date_from": "2026-12-02", "date_to": "2026-12-01"}}),
+    ("subscribe", {"city": "Уфа", "category": "концерт", "replace_subscription_id": ""}),
     ("save_feedback", {"message": "  "}),
     ("save_feedback", {"message": "x", "user_id": "other-user"}),
     ("search_events", {"sql": "DROP TABLE events"}),
