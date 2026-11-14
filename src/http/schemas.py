@@ -50,6 +50,7 @@ class AdminEventPatchInput(BaseModel):
     tags: Optional[list[str]] = Field(default=None, max_length=20)
     lat: Optional[float] = Field(default=None, ge=-90, le=90)
     lon: Optional[float] = Field(default=None, ge=-180, le=180)
+    status: Optional[Literal["published", "draft", "cancelled"]] = None
 
 
 class PublicEventSource(BaseModel):

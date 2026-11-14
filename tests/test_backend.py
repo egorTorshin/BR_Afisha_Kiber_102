@@ -147,6 +147,19 @@ def test_moderation_api_and_reimport(db):
         assert json.loads(rows[0]["changes_json"])["status"] == {"old": "published", "new": "draft"}
 
 
+def test_archive_event_hides_without_deleting_sources_or_history(db):
+    service = ImportService(db)
+    _, record = service.create_event_manual(event(), actor="moderator:42")
+    archived = service.archive_event(record.id, actor="admin:root")
+    assert archived.status == "draft"
+    assert db.fetchone("SELECT id FROM events WHERE id = ?", (record.id,))
+    assert db.fetchone("SELECT event_id FROM event_sources WHERE event_id = ?", (record.id,))
+    audit = db.fetchone("SELECT actor, action, changes_json FROM audit_log WHERE entity_id = ? AND action = 'archive_event'",
+                        (record.id,))
+    assert audit["actor"] == "admin:root"
+    assert json.loads(audit["changes_json"])["archived"]["new"] is True
+
+
 def test_all_changed_event_fields_audited(db):
     service = ImportService(db)
     _, initial = service.create_event_manual(event(price_min=100))
@@ -229,7 +242,7 @@ def test_upgrade_existing_database_preserves_data_sources_and_ids(empty_db, tmp_
     insert_legacy(db, event(), event_id="legacy_one", raw_id="raw_one")
     insert_legacy(db, event(source_url="https://example.com/two", status="черновик"), event_id="legacy_two", raw_id="raw_two")
     insert_legacy(db, event(title="Бесплатный вход", price_min=0), event_id="legacy_free", raw_id="raw_free")
-    assert apply_migrations(db, MIGRATIONS) == 3
+    assert apply_migrations(db, MIGRATIONS) == len(list(MIGRATIONS.glob('*.sql'))) - 1
     assert apply_migrations(db, MIGRATIONS) == 0
     assert len(db.fetchall("SELECT * FROM events")) == 3  # Old snapshots and IDs retained.
     assert len(db.fetchall("SELECT * FROM events WHERE merged_into IS NULL")) == 2
@@ -263,7 +276,7 @@ def test_failed_migration_is_atomic(empty_db, tmp_path, monkeypatch):
     assert len(db.fetchall("SELECT * FROM schema_migrations")) == 1
     assert db.fetchone("SELECT price_min, status FROM events WHERE id = 'old'") == {"price_min": 0, "status": "опубликовано"}
     monkeypatch.setattr(migrations, "_backfill_admin_data", original)
-    assert apply_migrations(db, MIGRATIONS) == 3
+    assert apply_migrations(db, MIGRATIONS) == len(list(MIGRATIONS.glob('*.sql'))) - 1
 
 
 

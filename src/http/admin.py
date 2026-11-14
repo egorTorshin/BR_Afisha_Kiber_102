@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from src.config import Settings
 from src.db.connection import Database
 from src.services.admin_auth import AdminAuth, SESSION_SECONDS
+from src.services.user_service import UserService
 from src.services.admin_catalog_service import AdminCatalogService
 from src.services.feedback_service import FeedbackService
 from src.services.import_service import ImportService
@@ -24,11 +25,28 @@ def create_admin_router(database: Database, settings: Settings, auth: AdminAuth)
     feedback = FeedbackService(database)
     importer = ImportService(database, max_import_bytes=settings.max_import_bytes,
                              max_import_rows=settings.max_import_rows)
+    users = UserService(database)
 
     def require_admin(request: Request, write: bool = False, *, roles: tuple[str, ...] = ("admin", "moderator")):
+        session = auth.get_session(request.cookies.get("admin_session", ""))
+        if session is None:
+            user = users.session(request.cookies.get('user_session', ''))
+            if user and user['role'] == 'user':
+                raise HTTPException(403, 'Недостаточно прав')
+            if user and user['role'] in ('admin', 'moderator'):
+                session = {'username': user['id'], 'role': user['role'], 'csrf_hash': ''}
+                if write:
+                    check_browser_origin(request, settings)
+                    if request.headers.get('origin') != settings.web_origin or not (
+                        request.cookies.get('user_csrf') and
+                        hmac.compare_digest(request.cookies['user_csrf'], request.headers.get('x-csrf-token', ''))
+                    ):
+                        raise HTTPException(403, 'Недопустимый источник запроса')
+                if user['role'] not in roles:
+                    raise HTTPException(403, 'Недостаточно прав')
+                return session
         if not (settings.admin_password or settings.admin_password_hash):
             raise HTTPException(503, "Админка не настроена")
-        session = auth.get_session(request.cookies.get("admin_session", ""))
         if session is None:
             raise HTTPException(401, "Требуется авторизация")
         if session["role"] not in roles:
@@ -82,10 +100,58 @@ def create_admin_router(database: Database, settings: Settings, auth: AdminAuth)
                      session: dict = Depends(admin_read)):
         return catalog.list_events(q, status, page)
 
+    @router.get("/api/v1/admin/overview")
+    def admin_overview(session: dict = Depends(admin_read)):
+        return catalog.overview()
+
+    @router.get("/api/v1/admin/monitoring")
+    def admin_monitoring(session: dict = Depends(admin_only_read)):
+        from src.utils.metrics import REGISTRY
+        # Return only bounded, aggregate metrics. Raw Prometheus exposition stays on the
+        # loopback/internal scrape endpoint and never includes request/user identifiers.
+        families = list(REGISTRY.collect())
+        samples = {sample.name: sample.value for family in families for sample in family.samples}
+        def total(prefix: str) -> float:
+            return round(sum(value for name, value in samples.items() if name.startswith(prefix)), 3)
+        http = [{"channel": sample.labels.get("channel", "web"), "method": sample.labels.get("method", ""),
+                 "status": sample.labels.get("status", ""), "count": sample.value}
+                for family in families for sample in family.samples
+                if family.name == "http_requests" and sample.name.endswith("_total")]
+        ai = [{"component": sample.labels.get("component", ""), "outcome": sample.labels.get("outcome", ""),
+               "count": sample.value}
+              for family in families for sample in family.samples
+              if family.name == "ai_calls" and sample.name.endswith("_total")]
+        return {"status": "ok", "http_requests": http,
+                "telegram_updates": total("afisha_bot_updates_total"), "ai_calls": ai,
+                "ai_fallbacks": total("afisha_ai_fallbacks_total"),
+                "ai_tokens": total("afisha_ai_tokens_total"),
+                "ai_cost_usd": total("afisha_ai_cost_usd_total"),
+                "redis": {"available": False, "message": "Redis в проекте не используется"},
+                "max": {"available": False, "message": "MAX интеграция не реализована"}}
+
+    @router.get("/api/v1/admin/settings")
+    def admin_settings(session: dict = Depends(admin_only_read)):
+        return {"roles": ["user", "moderator", "admin"],
+                "configuration": {"max_import_bytes": settings.max_import_bytes,
+                                  "max_import_rows": settings.max_import_rows,
+                                  "web_origin": settings.web_origin}}
+
+    @router.post("/api/v1/admin/events", response_model=AdminEvent, status_code=201)
+    def admin_create_event(body: AdminEventPatchInput, session: dict = Depends(admin_write)):
+        payload = body.model_dump(exclude_unset=True)
+        payload.setdefault("status", "draft")
+        _, record = run_service(importer.create_event_manual, payload,
+                                actor=f"admin:{session['username']}")
+        return record
+
     @router.patch("/api/v1/admin/events/{event_id}", response_model=AdminEvent)
     def admin_update_event(event_id: str, body: AdminEventPatchInput, session: dict = Depends(admin_write)):
         return run_service(importer.update_event_fields, event_id, body.model_dump(exclude_unset=True),
                            actor=f"admin:{session['username']}")
+
+    @router.delete("/api/v1/admin/events/{event_id}", response_model=AdminEvent)
+    def admin_archive_event(event_id: str, session: dict = Depends(admin_write)):
+        return run_service(importer.archive_event, event_id, actor=f"admin:{session['username']}")
 
     @router.patch("/api/v1/admin/events/{event_id}/status", response_model=AdminEvent)
     def admin_event_status(event_id: str, body: EventStatusInput, session: dict = Depends(admin_write)):
@@ -99,6 +165,10 @@ def create_admin_router(database: Database, settings: Settings, auth: AdminAuth)
     @router.get("/api/v1/admin/audit", response_model=list[AuditEntry])
     def admin_audit(session: dict = Depends(admin_only_read)):
         return catalog.recent_audit()
+
+    @router.get("/api/v1/admin/traces")
+    def admin_traces(session: dict = Depends(admin_only_read)):
+        return catalog.recent_traces()
 
     @router.post("/api/v1/admin/import")
     async def admin_import(request: Request, filename: str = Query(...), session: dict = Depends(admin_only_write)):

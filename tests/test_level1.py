@@ -118,10 +118,13 @@ class TestAfishaLevel1(unittest.TestCase):
 
     def test_05_end_to_end_bot_scenario_and_3_clicks_to_card(self) -> None:
         """Сквозной сценарий: /start -> фильтр -> выдача 3-5 карточек -> карточка (не более 3 действий) -> подписка и отписка."""
+        # Пользователь уже завершил обязательный выбор языка и регистрацию профиля.
+        self.router.profile_service.ensure("user_42", "ru")
+        self.router.profile_service.update("user_42", onboarding_state="complete")
         # Действие 1: /start
         r1 = self.router.handle_message("user_42", "/start")
-        self.assertIn("Афиша культурных мероприятий Башкортостана", r1.text)
-        self.assertIsNotNone(r1.reply_markup)
+        self.assertIn("Доброго времени суток", r1.text)
+        self.assertEqual(r1.reply_markup["inline_keyboard"][0][0]["callback_data"], "profile:open")
 
         # Действие 2: выбор города Уфа
         r2 = self.router.handle_callback("user_42", "city:Уфа")
@@ -142,9 +145,9 @@ class TestAfishaLevel1(unittest.TestCase):
         subs = self.sub_service.list_subscriptions("user_42")
         self.assertEqual(len(subs), 1)
 
-        # Отписка одной командой /unsubscribe
-        r_unsub = self.router.handle_message("user_42", "/unsubscribe")
-        self.assertIn("отписаны от всех уведомлений", r_unsub.text)
+        # Новый интерфейс переключает подписку повторным нажатием на неё.
+        r_unsub = self.router.handle_callback("user_42", "sub_toggle:Уфа:концерт")
+        self.assertIn("Подписка удалена", r_unsub.text)
         self.assertEqual(len(self.sub_service.list_subscriptions("user_42")), 0)
 
     def test_06_control_queries_and_typo_and_empty_explanation(self) -> None:
@@ -208,11 +211,17 @@ class TestAfishaLevel1(unittest.TestCase):
         import asyncio
         from src.bot.telegram_runner import TelegramPollingRunner
 
-        # Проверяем живые счётчики в главном меню и меню городов
+        # Новый пользователь сначала выбирает язык, затем завершает согласованный онбординг.
         r_start = self.router.handle_message("user_99", "/start")
-        self.assertIn("Подходящих событий в базе: <b>18</b>", r_start.text)
-        main_btn = r_start.reply_markup["inline_keyboard"][0][0]["text"]
-        self.assertIn("Показать события (18)", main_btn)
+        self.assertIn("Выберите язык", r_start.text)
+        self.assertEqual(r_start.reply_markup["inline_keyboard"][0][0]["callback_data"], "lang:ru")
+        r_name = self.router.handle_callback("user_99", "lang:ru")
+        self.assertIn("Введите ваше имя", r_name.text)
+        self.router.handle_message("user_99", "Айгуль")
+        self.router.handle_message("user_99", "+79990000000")
+        self.router.handle_callback("user_99", "onboarding:skip_city")
+        r_home = self.router.handle_message("user_99", "/start")
+        self.assertEqual(r_home.reply_markup["inline_keyboard"][0][1]["callback_data"], "leisure:start")
 
         r_cities = self.router.handle_callback("user_99", "menu:cities")
         cities_flat = [btn["text"] for row in r_cities.reply_markup["inline_keyboard"] for btn in row]
@@ -273,7 +282,7 @@ class TestAfishaLevel1(unittest.TestCase):
 
         asyncio.run(run_ui_flow())
         methods = [m for m, _ in called_endpoints]
-        self.assertEqual(methods, ["sendMessage", "answerCallbackQuery", "editMessageText", "sendMessage", "deleteMessage"])
+        self.assertEqual(methods, ["sendMessage", "deleteMessage", "answerCallbackQuery", "editMessageText", "sendMessage", "deleteMessage", "deleteMessage"])
 
 
 if __name__ == "__main__":

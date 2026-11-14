@@ -11,6 +11,8 @@ from src.models.schemas import FeedbackRecord, SearchFilters
 from src.services.feedback_service import FeedbackService
 from src.services.search_service import SearchService
 from src.http.errors import run_service
+from src.utils.metrics import DATABASE_UP, DATABASE_LATENCY
+import time
 
 
 def create_public_router(database: Database) -> APIRouter:
@@ -34,7 +36,16 @@ def create_public_router(database: Database) -> APIRouter:
 
     @router.get("/health", response_model=HealthResponse)
     def health():
-        database.ping()
+        started = time.perf_counter()
+        kind = "postgresql" if database.is_postgres else "sqlite"
+        try:
+            database.ping()
+            DATABASE_UP.labels(kind).set(1)
+        except Exception:
+            DATABASE_UP.labels(kind).set(0)
+            raise
+        finally:
+            DATABASE_LATENCY.labels(kind).observe(time.perf_counter() - started)
         return HealthResponse(status="ok")
 
     @router.get("/api/v1/cities", response_model=list[CityItem])

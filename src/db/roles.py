@@ -39,6 +39,14 @@ ROLE_TABLES = {
     },
 }
 
+for role in ('afisha_api', 'afisha_bot'):
+    permissions = ROLE_TABLES[role]
+    for action in ('SELECT', 'INSERT', 'UPDATE'):
+        permissions[action] += ('users', 'user_identities', 'event_views')
+    if role == 'afisha_api':
+        for action in ('SELECT', 'INSERT', 'UPDATE'):
+            permissions[action] += ('user_sessions',)
+
 
 def provision_roles(db: Database) -> None:
     if not db.is_postgres:

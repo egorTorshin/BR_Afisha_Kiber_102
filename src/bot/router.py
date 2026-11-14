@@ -47,6 +47,7 @@ from src.services.normalizer import parse_free_text_query, parse_iso_datetime, r
 from src.services.search_service import SearchService
 from src.services.subscription_service import SubscriptionService
 from src.services.profile_service import ProfileService
+from src.services.user_service import UserService
 from src.utils.logger import get_logger, log_event, new_request_id
 from src.utils.rate_limiter import RateLimiter
 
@@ -72,6 +73,7 @@ class BotRouter:
         self.sub_service = SubscriptionService(db, retention_days=settings.subscription_retention_days)
         self.agent_service = AgentService(db, settings)
         self.profile_service = ProfileService(db)
+        self.user_service = UserService(db)
         self.rate_limiter = RateLimiter(max_requests_per_minute=settings.rate_limit_per_minute)
         self.logger = get_logger("afisha_rb.bot", settings.log_level)
 
@@ -93,7 +95,8 @@ class BotRouter:
         return self._user_filters[uid]
 
     def is_admin(self, user_id: str) -> bool:
-        return str(user_id) in set(self.settings.admin_user_ids)
+        user = self.user_service.telegram_user(str(user_id), create=False)
+        return str(user_id) in set(self.settings.admin_user_ids) or bool(user and user['role'] == 'admin')
 
     def _language(self, user_id: str) -> str:
         profile = self.profile_service.get(str(user_id))
@@ -202,6 +205,8 @@ class BotRouter:
         new_request_id()
         uid = str(user_id)
 
+        self.user_service.telegram_user(uid)
+
         if not self.rate_limiter.allow(uid):
             log_event(self.logger, logging.WARNING, "Rate limit exceeded", user_id=uid)
             return BotResponse(
@@ -246,6 +251,9 @@ class BotRouter:
                     )
                     return BotResponse(text=prompts.get(state, prompts["name"]), reply_markup=markup)
                 return self._build_main_menu_response(uid)
+
+            if clean_text.startswith('/event_'):
+                return self._open_card(uid, clean_text[len('/event_'):])
 
             if clean_text.startswith("/"):
                 return self._build_main_menu_response(
@@ -433,6 +441,8 @@ class BotRouter:
                 uid,
                 prefix_notice="⚠️ Событие с указанным идентификатором не найдено в базе данных.",
             )
+        user = self.user_service.telegram_user(uid)
+        self.user_service.record_view(user['id'], ev.id, 'telegram')
         profile = self.profile_service.get(uid)
         if profile and profile.get("latitude") is not None and profile.get("longitude") is not None:
             ev.distance_km = self.search_service.distance_km(profile["latitude"], profile["longitude"], ev)

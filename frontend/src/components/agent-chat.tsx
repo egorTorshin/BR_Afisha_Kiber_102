@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { ArrowRight, LoaderCircle, Send } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { AgentChatResponse, AgentEventCard } from "@/lib/types";
 import { formatDate } from "./ui";
+import { VoiceInput } from "./voice-input";
 
 type ChatMessage = { role: "user" | "assistant"; text: string };
 
@@ -28,6 +29,20 @@ export function AgentChat({ compact = false }: { compact?: boolean }) {
   const [cards, setCards] = useState<AgentEventCard[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem("afisha-agent-chat") || "null");
+        if (saved?.messages && Array.isArray(saved.messages)) setMessages(saved.messages.slice(-10));
+        if (typeof saved?.conversationId === "string") setConversationId(saved.conversationId);
+      } catch { localStorage.removeItem("afisha-agent-chat"); }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    if (messages.length || conversationId) localStorage.setItem("afisha-agent-chat", JSON.stringify({ messages: messages.slice(-10), conversationId }));
+  }, [messages, conversationId]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -87,6 +102,7 @@ export function AgentChat({ compact = false }: { compact?: boolean }) {
       )}
       <form className="agent-chat-form" onSubmit={submit}>
         <label className="sr-only" htmlFor="agent-message">Ваш вопрос агенту</label>
+        <VoiceInput disabled={pending} onText={(text) => setMessage((current) => current ? `${current} ${text}` : text)} />
         <input id="agent-message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Например: бесплатные выставки в Уфе…" maxLength={4000} disabled={pending} />
         <button className="button" type="submit" disabled={pending || !message.trim()}>{pending ? "Ищем…" : "Спросить"} <Send size={16} /></button>
       </form>

@@ -688,6 +688,26 @@ class ImportService:
             self.db.lock_events()
             return self._update_event_status(event_id, new_status, actor)
 
+    def archive_event(self, event_id: str, actor: str) -> EventRecord:
+        """Soft-delete by hiding the event as a locked draft; retain sources and full audit history."""
+        with self.db.transaction():
+            self.db.lock_events()
+            previous = self.db.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
+            if not previous:
+                raise LookupError("Событие не найдено")
+            if previous.get("merged_into"):
+                raise ValueError("Событие уже объединено с другой карточкой")
+            now_iso = datetime.now(timezone.utc).isoformat()
+            self.db.execute("UPDATE events SET status = 'draft', status_locked = 1, updated_at = ? WHERE id = ?",
+                            (now_iso, event_id))
+            self.log_audit(actor, "archive_event", "event", event_id,
+                           {"archived": {"old": False, "new": True},
+                            "status": {"old": previous["status"], "new": "draft"}})
+            row = self.db.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
+            record = EventRecord.from_row(row)
+            record.sources = self.list_sources(event_id)
+            return record
+
     def update_event_fields(self, event_id: str, changes: Dict[str, Any], actor: str) -> EventRecord:
         """Validate editable fields and persist them with the standard audit trail."""
         editable = set(self.REQUIRED_FIELDS) | {"date_end", "duration_min", "price_min", "price_max", "is_free",

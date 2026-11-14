@@ -14,6 +14,8 @@ from src.db.connection import Database
 from src.http.security import check_browser_origin
 from src.services.admin_auth import AdminAuth
 from src.services.agent_service import AgentService
+from src.services.user_service import UserService
+from src.services.speech_service import SpeechUnavailable, transcribe_audio
 
 
 class AgentChatInput(BaseModel):
@@ -40,6 +42,7 @@ def create_agent_router(database: Database, settings: Settings, auth: AdminAuth,
         light_factory=LightLLMProvider,
         heavy_factory=HeavyLLMProvider,
     )
+    users = UserService(database)
 
     @router.post("/api/v1/agent/chat", response_model=AgentChatOutput)
     def agent_chat(body: AgentChatInput, request: Request, response: Response):
@@ -67,12 +70,27 @@ def create_agent_router(database: Database, settings: Settings, auth: AdminAuth,
             request_id=result.request_id,
         )
 
+    @router.post("/api/v1/speech/transcribe")
+    async def speech_transcribe(request: Request):
+        check_browser_origin(request, settings)
+        audio = await request.body()
+        if len(audio) > settings.speech_max_bytes:
+            raise HTTPException(413, "Аудиозапись превышает допустимый размер")
+        filename = request.headers.get("x-audio-filename", "recording.webm")[:120]
+        try:
+            return {"text": transcribe_audio(audio, filename, request.headers.get("content-type", "audio/webm"), settings)}
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except SpeechUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
+
     @router.get("/api/v1/admin/agent/traces/{request_id}")
     def agent_trace(request_id: str, request: Request):
         session = auth.get_session(request.cookies.get("admin_session", ""))
-        if session is None:
+        user = users.session(request.cookies.get("user_session", ""))
+        if session is None and user is None:
             raise HTTPException(401, "Требуется авторизация")
-        if session["role"] != "admin":
+        if not ((session and session["role"] == "admin") or (user and user["role"] == "admin")):
             raise HTTPException(403, "Недостаточно прав")
         trace = service.get_trace(request_id)
         if trace is None:

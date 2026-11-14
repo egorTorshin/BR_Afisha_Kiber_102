@@ -66,6 +66,8 @@ class Settings:
     heavy_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("HEAVY_LLM_TIMEOUT_SECONDS", "90")))
     heavy_context_window: int = field(default_factory=lambda: int(os.getenv("HEAVY_LLM_CONTEXT_WINDOW", "4096")))
     heavy_top_n: int = field(default_factory=lambda: int(os.getenv("HEAVY_LLM_TOP_N", "8")))
+    groq_api_key: str = field(default_factory=lambda: os.getenv("GROQ_API_KEY", "").strip())
+    speech_max_bytes: int = field(default_factory=lambda: int(os.getenv("SPEECH_MAX_BYTES", str(20 * 1024 * 1024))))
     dialogue_ttl_days: int = field(default_factory=lambda: max(1, int(os.getenv("AGENT_DIALOGUE_TTL_DAYS", "30"))))
     model_prices: dict = field(default_factory=lambda: json.loads(os.getenv("AGENT_MODEL_PRICES_JSON", "{}")))
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")

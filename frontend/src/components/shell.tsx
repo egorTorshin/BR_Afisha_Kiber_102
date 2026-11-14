@@ -8,6 +8,7 @@ const links = [
   { href: "/events", label: "Афиша событий" },
   { href: "/agent", label: "Спросить агента" },
   { href: "/feedback", label: "Обратная связь" },
+  { href: "/profile", label: "Мой профиль" },
 ];
 export function Header() {
   const pathname = usePathname();

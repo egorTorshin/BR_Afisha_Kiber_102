@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowUpRight, CalendarDays, MapPin } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { EventStatusBadge, ErrorState, formatDate } from "@/components/ui";
 import { ShareEvent } from "@/components/share-event";
+import { RecordView } from "@/components/record-view";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ returnTo?: string | string[] }> };
@@ -74,6 +75,7 @@ export default async function EventDetail({ params, searchParams }: Props) {
 
   return (
     <article className="container page-content detail" itemScope itemType="https://schema.org/Event">
+      <RecordView id={event.id} />
       <nav className="detail-navigation" aria-label="Навигация по афише">
         <Link className="text-link" href={returnHref}><ArrowLeft size={18} aria-hidden="true" /> К афише</Link>
         <ShareEvent />

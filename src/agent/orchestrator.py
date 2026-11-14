@@ -21,6 +21,7 @@ from src.agent.repositories import (DialogueStateRepository, AgentTraceRepositor
 from src.config import Settings
 from src.services.normalizer import parse_free_text_query
 from src.services.search_service import SearchService
+from src.utils.metrics import AI_CALLS, AI_LATENCY, AI_TOKENS, AI_COST, AI_FALLBACKS
 
 
 _YES = {"да", "подтверждаю", "подтвердить", "да, подтверждаю"}
@@ -286,6 +287,25 @@ class AgentOrchestrator:
             trace.stop_reason = stop
             trace.fallback_reason = fallback_reason
             trace.latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+            if trace.router_decision is not None:
+                router_component = "jev" if self.settings.jev_enabled and self.settings.ai_mode != "no-ai" else "regex"
+                AI_CALLS.labels(router_component,
+                                "fallback" if trace.router_decision.fallback else "success").inc()
+                AI_LATENCY.labels(router_component).observe(trace.router_decision.latency_ms / 1000)
+            if usage:
+                for index, _item in enumerate(usage):
+                    model_component = "heavy" if (trace.escalated and index == len(usage) - 1) else "light"
+                    AI_CALLS.labels(model_component, "error" if stop == "internal_error" else "success").inc()
+                model_component = "heavy" if trace.model_route == ModelRoute.HEAVY else "light"
+                AI_LATENCY.labels(model_component).observe(trace.latency_ms / 1000)
+            for item in usage:
+                model = str(item.get("model_name", "unknown"))[:64]
+                AI_TOKENS.labels(model, "input").inc(max(0, int(item.get("input_tokens", 0))))
+                AI_TOKENS.labels(model, "output").inc(max(0, int(item.get("output_tokens", 0))))
+            if trace.cost is not None:
+                AI_COST.inc(float(trace.cost))
+            if fallback_reason:
+                AI_FALLBACKS.labels(str(fallback_reason)[:64]).inc()
             self.trace_repository.save(state.conversation_id, trace)
         return AgentResponse(message=message, result_ids=[card.id for card in cards],
                              event_cards=cards, trace_id=request_id)

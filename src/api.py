@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 import json
 import logging
+import time
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -16,6 +17,7 @@ from src.db.connection import Database
 from src.services.admin_auth import AdminAuth
 from src.http.schemas import ErrorResponse
 from src.http.security import VISITOR_COOKIE, check_browser_origin, visitor_identity
+from src.utils.metrics import HTTP_REQUESTS, HTTP_LATENCY, render_metrics
 
 
 def create_app(db: Optional[Database] = None, settings: Optional[Settings] = None) -> FastAPI:
@@ -33,6 +35,9 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
 
     app = FastAPI(title="Афиша культуры Башкортостана", lifespan=lifespan,
                   responses={code: {"model": ErrorResponse} for code in (401, 403, 404, 413, 422, 429, 500, 503)})
+    @app.get("/metrics", include_in_schema=False)
+    def metrics_endpoint():
+        return render_metrics()
     logger = get_logger("afisha_rb.api", settings.log_level)
     auth = AdminAuth(database, settings)
 
@@ -67,25 +72,27 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
 
     # CORS wraps the failure boundary; request context wraps CORS, including preflight.
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
-                       allow_methods=["GET", "POST", "PATCH", "OPTIONS"], allow_headers=["Content-Type", "X-Request-ID", "X-CSRF-Token"],
+                       allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "X-Request-ID", "X-CSRF-Token"],
                        expose_headers=["X-Request-ID", "Cache-Control"])
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
+        started_at = time.perf_counter()
         token = request_id_ctx.set("system")
         rid = new_request_id()
         visitor_cookie = None
         try:
             try:
                 path = request.url.path
-                if path.startswith("/api/v1/admin/"):
+                if path.startswith(("/api/v1/admin/", "/api/v1/auth/", "/api/v1/users/")):
                     check_browser_origin(request, settings)
-                if request.method in {"POST", "PATCH", "PUT"}:
-                    body_limit = settings.max_import_bytes if path == "/api/v1/admin/import" else 64 * 1024
+                if request.method in {"POST", "PATCH", "PUT", "DELETE"}:
+                    body_limit = (settings.max_import_bytes if path == "/api/v1/admin/import" else
+                                  settings.speech_max_bytes if path in {"/api/v1/speech/transcribe", "/api/v1/admin/voice-draft"} else 64 * 1024)
                     declared = request.headers.get("content-length")
                     if declared and int(declared) > body_limit:
                         raise HTTPException(413, "Размер запроса превышает допустимый")
-                if request.method in {"POST", "PATCH", "PUT"}:
+                if request.method in {"POST", "PATCH", "PUT", "DELETE"}:
                     body = bytearray()
                     async for chunk in request.stream():
                         body.extend(chunk)
@@ -112,6 +119,9 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
                         identity = request.cookies.get("agent_session") or visitor
                         quotas = [("agent-chat:session", identity, 30, 60),
                                   ("agent-chat:ip", client_ip, 300, 60)]
+                    elif path == "/api/v1/speech/transcribe":
+                        quotas = [("speech:visitor", visitor, 10, 60),
+                                  ("speech:ip", client_ip, 60, 60)]
                     elif path.startswith("/api/v1/admin/"):
                         identity = request.cookies.get("admin_session") or visitor
                         limit = 2 if path == "/api/v1/admin/import" else 30
@@ -129,7 +139,7 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
                 log_event(logger, logging.ERROR, "Ошибка HTTP-запроса", exception_type=type(exc).__name__)
                 response = error_response(500, "Внутренняя ошибка сервера")
             response.headers["X-Request-ID"] = rid
-            if visitor_cookie and request.method in {"POST", "PATCH", "PUT"}:
+            if visitor_cookie and request.method in {"POST", "PATCH", "PUT", "DELETE"}:
                 response.set_cookie(VISITOR_COOKIE, visitor_cookie, httponly=True, samesite="lax",
                                     secure=settings.web_origin.startswith("https://") or request.url.scheme == "https",
                                     max_age=30 * 24 * 60 * 60, path="/")
@@ -145,14 +155,21 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
             response.headers["X-Frame-Options"] = "DENY"
             log_event(logger, logging.INFO, "HTTP-запрос обработан", method=request.method,
                       status_code=response.status_code)
+            route = request.scope.get("route")
+            path = getattr(route, "path", request.url.path)
+            if path != "/metrics":
+                HTTP_REQUESTS.labels("web", request.method, str(response.status_code)).inc()
+                HTTP_LATENCY.labels("web", request.method).observe(time.perf_counter() - started_at)
             return response
         finally:
             request_id_ctx.reset(token)
 
     from src.http.admin import create_admin_router
+    from src.http.users import create_user_router
     from src.http.agent import create_agent_router
     from src.http.public import create_public_router
     app.include_router(create_admin_router(database, settings, auth))
+    app.include_router(create_user_router(database, settings, auth))
     app.include_router(create_agent_router(database, settings, auth))
     app.include_router(create_public_router(database))
     return app

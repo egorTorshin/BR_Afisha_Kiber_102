@@ -30,12 +30,27 @@ def apply_migrations(db: Database, migrations_dir: Path) -> int:
                 _backfill_admin_data(db)
             if version == "003_security_search.sql":
                 _backfill_search_data(db)
+            if version == "006_unified_users.sql":
+                _backfill_users(db)
             db.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 (version, datetime.now(timezone.utc).isoformat()),
             )
             count += 1
     return count
+
+
+def _backfill_users(db: Database) -> None:
+    from uuid import uuid4
+    ids = {str(row['user_id']) for table in ('bot_profiles', 'subscriptions')
+           for row in db.fetchall(f'SELECT DISTINCT user_id FROM {table}')}
+    for telegram_id in sorted(ids):
+        profile = db.fetchone('SELECT name FROM bot_profiles WHERE user_id = ?', (telegram_id,))
+        user_id = str(uuid4())
+        db.execute('INSERT INTO users (id, display_name, created_at) VALUES (?, ?, ?)',
+                   (user_id, profile['name'] if profile else None, datetime.now(timezone.utc).isoformat()))
+        db.execute('INSERT INTO user_identities (provider, provider_id, user_id) VALUES (?, ?, ?)',
+                   ('telegram', telegram_id, user_id))
 
 
 def _backfill_search_data(db: Database) -> None:

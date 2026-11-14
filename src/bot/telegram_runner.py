@@ -2,8 +2,10 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional
 import httpx
+import time
+from src.utils.metrics import BOT_REQUESTS, BOT_LATENCY
 from src.bot.router import BotResponse, BotRouter
-from src.utils.logger import get_logger, log_event
+from src.utils.logger import get_logger, log_event, request_id_ctx, new_request_id
 
 
 class TelegramPollingRunner:
@@ -144,6 +146,10 @@ class TelegramPollingRunner:
         await self.send_new_screen(client, chat_id, text, reply_markup, parse_mode, delete_previous_bot_msg=True)
 
     async def _handle_update(self, client: httpx.AsyncClient, upd: Dict[str, Any]) -> None:
+        started = time.perf_counter()
+        outcome = "success"
+        ctx_token = request_id_ctx.set("system")
+        new_request_id()
         try:
             if "callback_query" in upd:
                 cq = upd["callback_query"]
@@ -262,6 +268,7 @@ class TelegramPollingRunner:
                 )
                 await self._safe_delete_message(client, chat_id, incoming_message_id)
         except Exception as exc:
+            outcome = "error"
             log_event(
                 self.logger,
                 logging.ERROR,
@@ -269,6 +276,10 @@ class TelegramPollingRunner:
                 update_id=upd.get("update_id"),
                 error_type=type(exc).__name__,
             )
+        finally:
+            BOT_REQUESTS.labels("telegram", outcome).inc()
+            BOT_LATENCY.observe(time.perf_counter() - started)
+            request_id_ctx.reset(ctx_token)
 
     async def run_forever(self) -> None:
         log_event(self.logger, logging.INFO, "Starting Telegram Bot polling loop (IPv4 transport, single-window UI)")
