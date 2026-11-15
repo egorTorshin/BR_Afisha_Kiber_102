@@ -1,8 +1,9 @@
 import "server-only";
+import { geocodeQuery } from "./geocode-query";
 
 export type MapLocation = { lat: number; lon: number };
 
-const resolved = new Map<string, MapLocation | null>();
+const resolved = new Map<string, MapLocation>();
 const pending = new Map<string, Promise<MapLocation | null>>();
 let queue = Promise.resolve();
 let nextRequestAt = 0;
@@ -15,10 +16,9 @@ function validLocation(lat: number, lon: number): MapLocation | null {
 async function lookup(address: string, city: string): Promise<MapLocation | null> {
   const origin = (process.env.MAP_GEOCODER_URL || "https://nominatim.openstreetmap.org").replace(/\/$/, "");
   const url = new URL(`${origin}/search`);
-  const cityName = city.trim().toLowerCase();
-  const street = address.split(",").map((part) => part.trim()).filter((part) =>
-    part && !/^\d{6}$/.test(part) && part.toLowerCase() !== cityName && part.toLowerCase() !== "россия").join(", ");
-  url.searchParams.set("q", [street, city, "Россия"].filter(Boolean).join(", "));
+  const query = geocodeQuery(address, city);
+  if (!query) return null;
+  url.searchParams.set("q", query);
   url.searchParams.set("format", "jsonv2");
   url.searchParams.set("limit", "1");
   url.searchParams.set("countrycodes", "ru");
@@ -38,12 +38,17 @@ async function lookup(address: string, city: string): Promise<MapLocation | null
     headers: { "User-Agent": "AfishaBashkortostana-EventMap/1.0", "Accept-Language": "ru" },
     cache: "force-cache",
     next: { revalidate: 60 * 60 * 24 * 30 },
-    signal: AbortSignal.timeout(6000),
+    signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) throw new Error(`Geocoder returned ${response.status}`);
   const results: unknown = await response.json();
   if (!Array.isArray(results) || !results.length) return null;
-  const first = results[0] as { lat?: string; lon?: string };
+  const first = results[0] as { lat?: string; lon?: string; address?: Record<string, string> };
+  const expectedCity = city.trim().toLocaleLowerCase("ru");
+  const details = first.address || {};
+  const foundCity = [details.city, details.town, details.village, details.hamlet]
+    .some((value) => value?.toLocaleLowerCase("ru") === expectedCity);
+  if (!foundCity || details["ISO3166-2-lvl4"] !== "RU-BA") return null;
   return validLocation(Number(first.lat), Number(first.lon));
 }
 
@@ -54,7 +59,7 @@ export async function geocodeEventAddress(address: string, city: string): Promis
   const existing = pending.get(key);
   if (existing) return existing;
   const request = lookup(address, city).then((location) => {
-    resolved.set(key, location);
+    if (location) resolved.set(key, location);
     return location;
   }).catch(() => null).finally(() => pending.delete(key));
   pending.set(key, request);

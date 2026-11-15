@@ -13,6 +13,7 @@ from src.agent.diagnostics import elapsed_ms, latest_index, update_current
 from src.agent.state import DialogueState
 from src.config import Settings
 from src.services.normalizer import parse_free_text_query, resolve_category, resolve_city
+from src.agent.search_context import starts_new_undated_search
 
 
 class SmartFilters(ContractModel):
@@ -181,6 +182,8 @@ class SmartProvider:
         if not patch and state.active_constraints == ConstraintSet():
             return done("clarification", "missing_conditions")
         inherited = state.active_constraints.model_dump(mode="json")
+        if starts_new_undated_search(message, has_date=bool(parsed.date_from or parsed.date_to)):
+            inherited["date_from"] = inherited["date_to"] = None
         if "date_from" in patch or "date_to" in patch:
             inherited["date_from"] = inherited["date_to"] = None
         if "max_price" in patch and patch["max_price"] != 0:

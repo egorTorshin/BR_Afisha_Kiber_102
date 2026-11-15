@@ -74,6 +74,19 @@ def test_smart_preserves_context_and_excludes_cancelled(tmp_path):
     assert trace(svc, second).execution_path == "SMART"
 
 
+def test_new_city_search_does_not_inherit_previous_date(tmp_path):
+    svc, transport = smart_service(tmp_path, json.dumps({"intent": "search_events", "filters": {
+        "city": "Уфа", "date_from": "2026-11-14", "date_to": "2026-11-14"}}))
+    ask(svc, "Куда сходить в Уфе сегодня")
+    transport.output = json.dumps({"intent": "search_events", "filters": {"city": "Стерлитамак"}})
+    reply = ask(svc, "куда сходить в стерлитамаке")
+    assert reply.event_cards
+    assert all(card.city == "Стерлитамак" for card in reply.event_cards)
+    assert state(svc).active_constraints.date_from is None
+    assert state(svc).active_constraints.date_to is None
+    assert trace(svc, reply).tool_calls[0].arguments.get("date_from") is None
+
+
 @pytest.mark.parametrize("output,query,reason", [
     ('{broken', 'Хочу спектакль до 1000 рублей', 'invalid_json'),
     (json.dumps({"intent": "search_events", "filters": {"city": "Казань"}}),

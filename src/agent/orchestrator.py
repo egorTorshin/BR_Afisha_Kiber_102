@@ -13,6 +13,7 @@ from src.agent.adaptive_router import AdaptiveIntentRouter, AdaptiveRoute
 from src.agent.heavy_llm import HeavyLLMProvider
 from src.agent.light_llm import LightLLMProvider
 from src.agent.smart import SmartProvider
+from src.agent.search_context import starts_new_undated_search
 from src.agent.structured_deep import StructuredDeepPlanner, StructuredDecisionEngine, eligible as structured_eligible
 from src.agent.routing import RoutingFeatureExtractor
 from src.agent.schemas import AgentEventCard, AgentRequest, AgentResponse, ConstraintSet, ModelRoute, ToolCall
@@ -112,6 +113,8 @@ def _required_constraints(message: str, state: DialogueState, settings: Settings
     values = state.active_constraints.model_dump(mode="json", exclude_none=True)
     current = {key: getattr(parsed, key, None) for key in ConstraintSet.model_fields}
     low = message.casefold().replace("ё", "е")
+    if starts_new_undated_search(message, has_date=bool(parsed.date_from or parsed.date_to)):
+        values["date_from"] = values["date_to"] = None
     for key, value in current.items():
         if value is not None and value is not False:
             values[key] = value[:10] if key in {"date_from", "date_to"} else value

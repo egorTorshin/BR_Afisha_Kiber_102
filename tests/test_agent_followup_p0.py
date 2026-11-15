@@ -54,6 +54,15 @@ def test_more_keeps_concert_filters_and_never_repeats(tmp_path):
     assert state(svc).shown_event_ids == ids(9)
 
 
+def test_new_undated_city_search_clears_previous_day(tmp_path):
+    svc, _ = service(tmp_path)
+    ask(svc, "Куда сходить в Уфе сегодня")
+    reply = ask(svc, "куда сходить в стерлитамаке")
+    assert reply.event_cards
+    assert all(card.city == "Стерлитамак" for card in reply.event_cards)
+    assert state(svc).active_constraints.date_from is None
+
+
 def test_cheaper_uses_shown_price_and_keeps_filters(tmp_path):
     svc, _ = service(tmp_path)
     assert ask(svc, "Концерты в Уфе").result_ids == ids(9)  # 700 ₽ minimum

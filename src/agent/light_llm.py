@@ -10,6 +10,7 @@ from typing import Literal, Protocol
 from pydantic import Field, ValidationError, model_validator
 
 from src.agent.schemas import ConstraintSet, ContractModel, ToolCall
+from src.agent.search_context import starts_new_undated_search
 from src.agent.security import PolicyDecision, inspect_input
 from src.agent.routing import RoutingFeatureExtractor
 from src.agent.state import DialogueState
@@ -277,7 +278,12 @@ class LightLLMProvider:
                 for key, old_value in inherited.items():
                     if deterministic_patch.get(key) is None:
                         patch[key] = old_value
-            merged = {**state.active_constraints.model_dump(), **patch}
+            merged = state.active_constraints.model_dump()
+            if starts_new_undated_search(message, has_date=bool(deterministic.date_from or deterministic.date_to)):
+                merged["date_from"] = merged["date_to"] = None
+                patch.pop("date_from", None)
+                patch.pop("date_to", None)
+            merged.update(patch)
             constraints = ConstraintSet.model_validate(merged)
             if message.casefold().strip() == "подешевле" and (
                 state.active_constraints.max_price is None or
