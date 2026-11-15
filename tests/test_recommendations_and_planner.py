@@ -110,12 +110,13 @@ def test_weekend_plan_respects_time_travel_and_total_budget(db):
     plan = service.build_weekend_plan(city="Уфа", date_from="2026-11-14", date_to="2026-11-14",
                                       max_budget_total=2000, party_size=2, target_count=3)
     assert len(plan.stops) == 3
-    assert plan.conflict_explanation is None
+    assert "не подтверждено" in plan.conflict_explanation
     assert plan.total_price == 1800
     assert plan.total_price == sum(stop.party_price for stop in plan.stops)
+    assert plan.total_travel_min is None
     for previous, current in zip(plan.stops, plan.stops[1:]):
-        assert previous.end_time + timedelta(minutes=current.travel_from_previous_min + 15) <= current.start_time
-        assert current.travel_from_previous_min <= 25
+        assert previous.end_time <= current.start_time
+        assert current.travel_from_previous_min is None
 
 
 def test_multiday_exhibition_end_date_is_availability_not_visit_duration(db):
@@ -130,8 +131,8 @@ def test_multiday_exhibition_end_date_is_availability_not_visit_duration(db):
         max_budget_total=200, target_count=2)
     assert len(plan.stops) == 2
     assert plan.stops[0].end_time == plan.stops[0].start_time + timedelta(minutes=60)
-    assert plan.stops[0].end_time + timedelta(
-        minutes=plan.stops[1].travel_from_previous_min + 15) <= plan.stops[1].start_time
+    assert plan.stops[0].end_time <= plan.stops[1].start_time
+    assert plan.total_travel_min is None
 
 
 def test_budget_conflict_is_exact_and_keeps_partial_route(db):
@@ -159,8 +160,9 @@ def test_travel_and_period_conflicts_offer_single_constraint_relaxation(db):
     travel = service.build_weekend_plan(
         city="Уфа", date_from="2026-11-14", date_to="2026-11-14",
         max_budget_total=2000, party_size=2, max_travel_min=10, target_count=3)
-    assert len(travel.stops) < 3
-    assert "увеличьте допустимый переезд" in travel.conflict_explanation
+    assert len(travel.stops) == 3
+    assert "Соблюдение лимита перемещения не подтверждено" in travel.conflict_explanation
+    assert travel.total_travel_min is None
 
     period = service.build_weekend_plan(
         city="Уфа", date_from="2026-11-13", date_to="2026-11-13",
@@ -169,6 +171,86 @@ def test_travel_and_period_conflicts_offer_single_constraint_relaxation(db):
     assert period.stops == []
     assert "на 1 дн." in period.conflict_explanation
     assert "до 2026-11-14" in period.conflict_explanation
+
+
+def test_weekend_plan_filters_cancelled_draft_and_over_age_events(db):
+    eligible = _plan_catalog(db)
+    cancelled = _add(db, "Отменённое событие", "концерт", "2026-11-14T16:00:00",
+                     "Площадка", 100, status="cancelled")
+    too_old = _add(db, "Только для взрослых", "концерт", "2026-11-14T17:00:00",
+                   "Площадка", 100)
+    draft = _add(db, "Черновик", "концерт", "2026-11-14T18:00:00",
+                 "Площадка", 100, status="draft")
+    db.execute("UPDATE events SET age_limit = 18 WHERE id = ?", (too_old.id,))
+    result = RecommendationService(db).build_weekend_plan(
+        city="Уфа", date_from="2026-11-14", date_to="2026-11-14",
+        max_age_limit=12, target_count=3)
+    assert {stop.event.id for stop in result.stops} == {item.id for item in eligible}
+    assert cancelled.id not in {stop.event.id for stop in result.stops}
+    assert draft.id not in {stop.event.id for stop in result.stops}
+    assert too_old.id not in {stop.event.id for stop in result.stops}
+
+
+def test_weekend_plan_does_not_use_unknown_price_or_duration_as_facts(db):
+    _plan_catalog(db)
+    unknown_price = _add(db, "Цена не указана", "концерт", "2026-11-14T17:00:00",
+                         "Площадка", 100)
+    unknown_duration = _add(db, "Длительность не указана", "концерт", "2026-11-14T18:00:00",
+                            "Площадка", 100, duration=None)
+    db.execute("UPDATE events SET price_min = NULL, price_max = NULL, is_free = 0 WHERE id = ?",
+               (unknown_price.id,))
+    plan = RecommendationService(db).build_weekend_plan(
+        city="Уфа", date_from="2026-11-14", date_to="2026-11-14", target_count=3)
+    assert unknown_price.id not in {stop.event.id for stop in plan.stops}
+    assert unknown_duration.id not in {stop.event.id for stop in plan.stops}
+    assert any(event.id == unknown_duration.id and "длительность неизвестна" in warning.lower()
+               for event, warning in plan.recommendations)
+    candidates = RecommendationService(db)._plan_candidates("Уфа", "2026-11-14", "2026-11-14", None)
+    assert unknown_price.id not in {item[0].id for item in candidates}
+    assert unknown_duration.id not in {item[0].id for item in candidates}
+
+
+def test_weekend_plan_only_confirms_same_venue_travel_and_known_intervals(db):
+    first = _add(db, "Длинное событие", "концерт", "2026-11-14T10:00:00",
+                 "Одна площадка", 100, duration=180)
+    overlap = _add(db, "Пересекающееся событие", "выставка", "2026-11-14T12:00:00",
+                   "Одна площадка", 100, duration=60)
+    service = RecommendationService(db)
+    plan = service.build_weekend_plan(
+        city="Уфа", date_from="2026-11-14", date_to="2026-11-14", target_count=2,
+        max_travel_min=0)
+    assert len(plan.stops) == 1
+    assert plan.stops[0].event.id == first.id
+    assert overlap.id not in {stop.event.id for stop in plan.stops}
+
+
+def test_weekend_plan_uses_zero_travel_only_for_matching_venue(db):
+    _add(db, "Первое", "концерт", "2026-11-14T10:00:00", "Одна площадка", 100, duration=60)
+    _add(db, "Второе", "выставка", "2026-11-14T12:00:00", "Одна площадка", 100, duration=60)
+    plan = RecommendationService(db).build_weekend_plan(
+        city="Уфа", date_from="2026-11-14", date_to="2026-11-14", target_count=2,
+        max_travel_min=0)
+    assert len(plan.stops) == 2
+    assert plan.total_travel_min == 0
+    assert plan.conflict_explanation is None
+
+
+def test_weekend_plan_recomputes_when_budget_period_or_city_changes(db):
+    _plan_catalog(db)
+    _plan_catalog(db, city="Салават")
+    service = RecommendationService(db)
+    base = service.build_weekend_plan(city="Уфа", date_from="2026-11-14", date_to="2026-11-14",
+                                      max_budget_total=2000, party_size=2)
+    lower_budget = service.build_weekend_plan(city="Уфа", date_from="2026-11-14", date_to="2026-11-14",
+                                              max_budget_total=1000, party_size=2)
+    other_day = service.build_weekend_plan(city="Уфа", date_from="2026-11-15", date_to="2026-11-15",
+                                           max_budget_total=2000, party_size=2)
+    other_city = service.build_weekend_plan(city="Салават", date_from="2026-11-14", date_to="2026-11-14",
+                                            max_budget_total=2000, party_size=2)
+    assert base.total_price == 1800 and len(base.stops) == 3
+    assert lower_budget.total_price <= 1000 and len(lower_budget.stops) < 3
+    assert other_day.stops == []
+    assert other_city.stops and all(stop.event.city == "Салават" for stop in other_city.stops)
 
 
 def test_csp_dynamic_program_matches_small_exhaustive_search(db):
@@ -189,11 +271,12 @@ def test_csp_dynamic_program_matches_small_exhaustive_search(db):
                 continue
             legs = [service._travel_minutes(candidates[left][0], candidates[right][0])
                     for left, right in zip(indices, indices[1:])]
-            if any(leg > 25 or candidates[left][2] + timedelta(minutes=leg + 15) > candidates[right][1]
+            if any((leg is not None and (leg > 25 or candidates[left][2] + timedelta(minutes=leg + 15) > candidates[right][1]))
+                   or (leg is None and candidates[left][2] > candidates[right][1])
                    for (left, right), leg in zip(zip(indices, indices[1:]), legs)):
                 continue
             key = (length, len({candidates[index][0].category for index in indices}),
-                   -sum(legs), -total_cost)
+                   -sum(leg or 0 for leg in legs), -total_cost)
             feasible.append(key)
     assert (len(path), len({candidates[index][0].category for index in path}), -travel, -cost) == max(feasible)
 
@@ -233,7 +316,8 @@ def test_bot_keeps_planner_response_in_no_ai_mode(db):
     bot = BotRouter(db, Settings(reference_date_str="2026-11-13", ai_mode="no-ai"))
     response = bot.handle_message(
         "planner-user", "Сделай план на субботу: три события, 2000 рублей на двоих в Уфе")
-    assert "Маршрут" in response.text
+    assert "Предварительный план" in response.text
+    assert "Соблюдение лимита перемещения не подтверждено" in response.text
     assert "Итого: 1800 ₽" in response.text
     assert response.reply_markup["inline_keyboard"][0][0]["callback_data"].startswith("card:")
 
@@ -267,3 +351,5 @@ def test_recommendation_api_requires_own_session_and_plan_api_is_grounded(db):
         assert result.status_code == 200, result.text
         assert len(result.json()["stops"]) == 3
         assert result.json()["total_price"] == 1800
+        assert result.json()["total_travel_min"] is None
+        assert "не подтверждено" in result.json()["conflict_explanation"]

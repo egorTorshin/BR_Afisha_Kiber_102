@@ -79,6 +79,40 @@ def test_plaintext_password_needs_no_extra_admin_secret_and_rotation_revokes_ses
         assert client.get("/api/v1/admin/session").status_code == 401
 
 
+def test_admin_session_expiry_and_unauthorized_routes(db):
+    settings = _settings()
+    with TestClient(create_app(db, settings), base_url="https://testserver") as client:
+        for path in ("session", "events", "overview", "moderation", "submissions",
+                     "feedback", "audit", "traces", "settings", "monitoring"):
+            assert client.get(f"/api/v1/admin/{path}").status_code == 401
+        assert client.post("/api/v1/admin/logout").status_code == 401
+        assert client.post("/api/v1/admin/login", json={
+            "username": "reviewer", "password": "test-password",
+        }).status_code == 200
+        db.execute("UPDATE admin_sessions SET expires_at = ?", ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),))
+        assert client.get("/api/v1/admin/session").status_code == 401
+        # The old /api/v1 route namespace is the registered API path; no alternate
+        # unversioned administrative endpoints should expose the same resource.
+        assert client.get("/admin/session").status_code == 404
+
+
+def test_login_errors_and_session_endpoint_do_not_echo_credentials(db, caplog):
+    username, password = "reviewer", "do-not-leak-this-password"
+    settings = Settings(admin_username=username, admin_password=password, admin_cookie_secure=False)
+    with TestClient(create_app(db, settings)) as client:
+        response = client.post("/api/v1/admin/login", json={"username": username, "password": "wrong-secret"})
+        assert response.status_code == 401
+        assert "wrong-secret" not in response.text
+        assert username not in response.text
+        assert "admin_session" not in response.text
+        assert "wrong-secret" not in caplog.text
+        assert client.post("/api/v1/admin/login", json={"username": username, "password": password}).status_code == 200
+        session = client.get("/api/v1/admin/session")
+        assert session.status_code == 200
+        assert password not in session.text
+        assert client.cookies.get("admin_session") not in session.text
+
+
 def test_admin_configuration_rejects_conflicting_credentials_and_weak_secrets():
     with pytest.raises(ValueError, match="только один способ"):
         Settings(admin_password="plaintext", admin_password_hash=hash_password("test-password", iterations=100_000))

@@ -39,6 +39,7 @@ class Settings:
     # Set true when the public app is served over HTTPS. Local HTTP stays usable.
     admin_cookie_secure: bool = field(default_factory=lambda: os.getenv("ADMIN_COOKIE_SECURE", "true").lower() in {"1", "true", "yes", "on"})
     rate_limit_per_minute: int = field(default_factory=lambda: int(os.getenv("RATE_LIMIT_PER_MINUTE", "30")))
+    event_submission_per_hour: int = field(default_factory=lambda: int(os.getenv("EVENT_SUBMISSION_PER_HOUR", "3")))
     subscription_retention_days: int = field(default_factory=lambda: int(os.getenv("SUBSCRIPTION_RETENTION_DAYS", "180")))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO").upper())
     reference_date_str: str = field(default_factory=lambda: os.getenv("REFERENCE_DATE", "").strip())
@@ -84,6 +85,10 @@ class Settings:
     speech_timeout_seconds: float = field(default_factory=lambda: float(os.getenv("SPEECH_TIMEOUT_SECONDS", "30")))
     dialogue_ttl_days: int = field(default_factory=lambda: max(1, int(os.getenv("AGENT_DIALOGUE_TTL_DAYS", "30"))))
     model_prices: dict = field(default_factory=lambda: json.loads(os.getenv("AGENT_MODEL_PRICES_JSON", "{}")))
+    agent_dialogue_cost_limit_usd: Decimal = field(default_factory=lambda: Decimal(
+        os.getenv("AGENT_DIALOGUE_COST_LIMIT_USD", "1.00")))
+    agent_daily_user_cost_limit_usd: Decimal = field(default_factory=lambda: Decimal(
+        os.getenv("AGENT_DAILY_USER_COST_LIMIT_USD", "5.00")))
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     migrations_dir: Path = field(default_factory=lambda: BASE_DIR / "migrations")
 
@@ -92,6 +97,14 @@ class Settings:
             raise ValueError("AI_MODE must be local-ai, native-ai or no-ai")
         if not isinstance(self.model_prices, dict):
             raise ValueError("AGENT_MODEL_PRICES_JSON must contain a JSON object")
+        for name in ("agent_dialogue_cost_limit_usd", "agent_daily_user_cost_limit_usd"):
+            try:
+                value = Decimal(str(getattr(self, name)))
+            except (InvalidOperation, TypeError, ValueError):
+                value = Decimal("NaN")
+            setattr(self, name, value)
+            if not value.is_finite() or value < 0:
+                raise ValueError("Лимиты расходов ИИ должны быть конечными неотрицательными суммами")
         if self.ai_mode == "native-ai":
             for name, value in (("JEV_BASE_URL", self.jev_base_url),
                                 ("LOCAL_LLM_BASE_URL", self.local_llm_base_url)):
@@ -139,6 +152,8 @@ class Settings:
             )
         ):
             raise ValueError("Некорректный лимит запросов или срок хранения")
+        if self.event_submission_per_hour < 1:
+            raise ValueError("Некорректный лимит публичных заявок")
         raw_admins = os.getenv("ADMIN_USER_IDS")
         if raw_admins is not None:
             self.admin_user_ids = [x.strip() for x in raw_admins.split(",") if x.strip()]
@@ -161,6 +176,9 @@ class Settings:
         for item in usage:
             prices = self.model_prices.get(item["model_name"])
             if not isinstance(prices, dict) or "input" not in prices or "output" not in prices:
+                if (self.ai_mode == "local-ai" and not self.jev_enabled
+                        and not self.model_prices):
+                    continue
                 return None
             try:
                 input_price = Decimal(str(prices["input"]))

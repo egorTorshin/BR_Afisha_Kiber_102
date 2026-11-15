@@ -621,20 +621,31 @@ class AgentOrchestrator:
                     if item.event.id not in observed_now:
                         execute(ToolCall(name="get_event", arguments={"event_id": item.event.id}))
                         observed_now = {event_id for group in tool_ids for event_id in group}
+                for event, _ in (plan.recommendations or []):
+                    if event.id not in observed_now:
+                        execute(ToolCall(name="get_event", arguments={"event_id": event.id}))
+                        observed_now = {event_id for group in tool_ids for event_id in group}
                 confirmed_stops = [item for item in plan.stops if item.event.id in observed_now]
-                basis = [item.event.id for item in confirmed_stops]
+                confirmed_recommendations = [item for item in (plan.recommendations or [])
+                                             if item[0].id in observed_now]
+                basis = ([item.event.id for item in confirmed_stops]
+                         + [item[0].id for item in confirmed_recommendations])
                 if confirmed_stops:
-                    lines = [f"Маршрут для {party_size} чел.:"]
+                    lines = [f"{'Предварительный план' if plan.total_travel_min is None else 'Маршрут'} для {party_size} чел.:"]
                     for number, item in enumerate(confirmed_stops, start=1):
                         if item.travel_from_previous_min:
                             lines.append(f"Переезд: {item.travel_from_previous_min} мин")
                         lines.append(f"{number}. {item.start_time:%d.%m %H:%M}–{item.end_time:%d.%m %H:%M} "
                                      f"{item.event.title} — {item.event.city}, {item.event.venue} "
                                      f"({item.party_price} ₽)")
+                    travel_summary = ("время переездов неизвестно" if plan.total_travel_min is None
+                                      else f"переезды: {plan.total_travel_min} мин.")
                     lines.append(f"Итого: {sum(item.party_price for item in confirmed_stops)} ₽ "
-                                 f"на компанию; переезды: {sum(item.travel_from_previous_min for item in confirmed_stops)} мин.")
+                                 f"на компанию; {travel_summary}")
                 else:
-                    lines = ["Маршрут по заданным условиям пока не найден."]
+                    lines = ["Подтверждённый маршрут по заданным условиям пока не найден."]
+                for event, warning in confirmed_recommendations:
+                    lines.append(f"Рекомендация: {event.title} — {warning}")
                 if plan.conflict_explanation:
                     lines.append(plan.conflict_explanation)
                 if len(confirmed_stops) < len(plan.stops):
@@ -643,9 +654,8 @@ class AgentOrchestrator:
                 if len(confirmed_stops) == target_count:
                     stop = "completed"
                 else:
-                    basis = []
                     stop = "clarification"
-                    message = plan.conflict_explanation or "Полный маршрут по заданным условиям не подтверждён. Уточните условия."
+                    message = "\n".join(lines)
             else:
                 if state.pending_confirmation:
                     state.pending_confirmation = None
@@ -1050,6 +1060,18 @@ class AgentOrchestrator:
             state.fast_context_safe = False
         finally:
             trace.inference_diagnostics = inference_recorder.rows
+            router_usage = [row for row in inference_recorder.rows
+                            if row.get("route") == "ROUTER" and row.get("model_alias")]
+            trace.input_tokens += sum(max(0, int(row.get("prompt_tokens") or 0))
+                                      for row in router_usage)
+            trace.output_tokens += sum(max(0, int(row.get("completion_tokens") or 0))
+                                       for row in router_usage)
+            for row in router_usage:
+                usage.append({
+                    "model_name": str(row["model_alias"]),
+                    "input_tokens": max(0, int(row.get("prompt_tokens") or 0)),
+                    "output_tokens": max(0, int(row.get("completion_tokens") or 0)),
+                })
             stage_latency["tool_execution"] = round(context.tool_latency_ms)
             stage_latency["jev_inference"] = sum(int(row.get("inference_latency_ms") or 0)
                 for row in inference_recorder.rows if row.get("route") == "ROUTER")

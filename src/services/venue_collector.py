@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -10,6 +12,7 @@ from datetime import datetime
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urljoin, urlsplit
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -27,16 +30,55 @@ class Venue:
     url: str
     host: str
     address: str
+    parser: str = ""
 
 
-VENUES = (
-    Venue("bashopera", "Башкирский государственный театр оперы и балета",
-          "https://bashopera.ru/affiche/", "bashopera.ru", "Уфа, улица Ленина, 5/1"),
-    Venue("bashgf", "Башкирская государственная филармония имени Хусаина Ахметова",
-          "https://bashgf.ru/afisha/", "bashgf.ru", "Уфа, улица Гоголя, 58"),
-    Venue("nur", "Уфимский государственный татарский театр «Нур»",
-          "https://teatrnur.ru/afisa", "teatrnur.ru", "Уфа, улица 50 лет СССР, 36"),
-)
+DEFAULT_SOURCE_CONFIG = Path(__file__).resolve().parents[2] / "config" / "event_sources.json"
+SUPPORTED_HTML_PARSERS = {"opera", "philharmonic", "nur"}
+
+
+def load_source_config(path: str | Path | None = None) -> list[dict[str, str]]:
+    """Load and validate source declarations; no network access is performed."""
+    config_path = Path(path or os.getenv("VENUE_SOURCES_CONFIG") or DEFAULT_SOURCE_CONFIG)
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Не удалось прочитать конфигурацию источников: {exc}") from exc
+    if not isinstance(payload, list):
+        raise ValueError("Конфигурация источников должна быть JSON-списком")
+    result = []
+    codes = set()
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise ValueError(f"Источник #{index + 1} должен быть объектом")
+        code, name, url, address, parser = (item.get(key) for key in ("code", "name", "url", "address", "parser"))
+        parsed = urlsplit(url if isinstance(url, str) else "")
+        if not isinstance(code, str) or not re.fullmatch(r"[a-z0-9_-]{2,40}", code) or code in codes:
+            raise ValueError(f"Некорректный или повторяющийся code у источника #{index + 1}")
+        if not all(isinstance(v, str) and v.strip() for v in (name, url, address, parser)):
+            raise ValueError(f"Источник {code} должен содержать name, url, address и parser")
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError(f"Некорректный URL источника {code}: требуется HTTPS URL без учётных данных")
+        if parser != "gkz" and parser not in SUPPORTED_HTML_PARSERS:
+            raise ValueError(f"Неподдерживаемый parser у источника {code}: {parser}")
+        codes.add(code)
+        result.append({"code": code, "name": name.strip(), "url": url.strip(),
+                       "address": address.strip(), "parser": parser.strip()})
+    return result
+
+
+def venues_from_config(path: str | Path | None = None) -> tuple[Venue, ...]:
+    venues = []
+    for item in load_source_config(path):
+        if item["parser"] == "gkz":
+            continue  # GKZ keeps its dedicated adapter and scheduler.
+        host = urlsplit(item["url"]).hostname or ""
+        venues.append(Venue(item["code"], item["name"], item["url"], host,
+                            item["address"], item["parser"]))
+    return tuple(venues)
+
+
+VENUES = venues_from_config()
 BY_CODE = {venue.code: venue for venue in VENUES}
 MONTHS = {name: i for i, name in enumerate(("января", "февраля", "марта", "апреля", "мая", "июня",
                                            "июля", "августа", "сентября", "октября", "ноября", "декабря"), 1)}
@@ -226,7 +268,8 @@ def parse_nur(html: str, venue: Venue = BY_CODE["nur"]) -> list[dict]:
     return records
 
 
-PARSERS = {"bashopera": parse_opera, "bashgf": parse_philharmonic, "nur": parse_nur}
+PARSER_ADAPTERS = {"opera": parse_opera, "philharmonic": parse_philharmonic, "nur": parse_nur}
+PARSERS = {venue.code: PARSER_ADAPTERS[venue.parser] for venue in VENUES}
 
 
 @dataclass
@@ -239,6 +282,8 @@ class VenueResult:
 
 class VenueCollector:
     def __init__(self, venue: Venue, *, client: httpx.Client | None = None, timeout: float = 20.0):
+        if timeout <= 0:
+            raise ValueError("Таймаут должен быть положительным")
         self.venue = venue
         headers = {"User-Agent": BROWSER_USER_AGENT if venue.code == "bashgf" else USER_AGENT,
                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}

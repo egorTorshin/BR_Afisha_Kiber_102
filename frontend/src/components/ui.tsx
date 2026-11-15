@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import {
   ArrowRight,
@@ -7,10 +9,14 @@ import {
 } from "lucide-react";
 import type { CultureEvent } from "@/lib/types";
 import { cardTitle } from "@/lib/event-title";
+import { formatDate } from "@/lib/format-date";
 import { RetryButton } from "./retry-button";
 import { CategoryIllustration } from "./category-illustration";
 import { BashkirCorner, BashkirOrnament } from "./cultural-art";
+import { useRef, useState } from "react";
 export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState(defaultValue);
   return (
     <div className="search-field">
       <Search size={21} aria-hidden="true" />
@@ -22,8 +28,11 @@ export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
         type="search"
         name="query_text"
         placeholder="Название, площадка или тема"
-        defaultValue={defaultValue}
+        value={value}
+        onChange={(event) => setValue(event.currentTarget.value)}
+        ref={input}
       />
+      {value && <button className="reset-link" type="button" aria-label="Очистить поиск" onClick={() => { setValue(""); input.current?.form?.requestSubmit(); }}>Очистить</button>}
       <button className="button" type="submit">
         Найти
       </button>
@@ -75,21 +84,6 @@ export function EventCard({ event, returnHref }: { event: CultureEvent; returnHr
       </div>
     </article>
   );
-}
-export function formatDate(value: string) {
-  // Naive backend timestamps are local to Bashkortostan (UTC+5).
-  const date = new Date(
-    /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}+05:00`,
-  );
-  return Number.isNaN(date.getTime())
-    ? "Дата уточняется"
-    : new Intl.DateTimeFormat("ru-RU", {
-        day: "numeric",
-        month: "long",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "Asia/Yekaterinburg",
-      }).format(date);
 }
 export function LoadingState() {
   return (

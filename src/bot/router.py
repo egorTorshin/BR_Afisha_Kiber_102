@@ -439,7 +439,8 @@ class BotRouter:
                 text="⏳ Пожалуйста, подождите несколько секунд перед следующим действием."
             )
 
-        log_event(self.logger, logging.INFO, "Incoming callback query", user_id=uid, callback=callback_data)
+        log_event(self.logger, logging.INFO, "Incoming callback query", user_id=uid,
+                  callback_length=len(callback_data or ""))
         filters = self.get_user_filters(uid)
         self._awaiting_custom_date.pop(uid, None)
 

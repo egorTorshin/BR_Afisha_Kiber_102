@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { AgentChatResponse, AgentEventCard } from "@/lib/types";
 import { cardTitle } from "@/lib/event-title";
-import { formatDate } from "./ui";
+import { formatDate } from "@/lib/format-date";
 import { VoiceInput } from "./voice-input";
 
 function price(card: AgentEventCard) {

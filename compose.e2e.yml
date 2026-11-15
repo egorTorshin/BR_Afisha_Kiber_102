@@ -1,0 +1,56 @@
+# Isolated local E2E overlay. Always pair with -p br-afisha-e2e and --env-file .env.e2e.
+services:
+  db:
+    ports:
+      - "127.0.0.1:15433:5432"
+  api:
+    ports:
+      - "127.0.0.1:18000:8000"
+    environment:
+      AI_MODE: no-ai
+      ADAPTIVE_AGENT_ENABLED: "false"
+      STRUCTURED_DEEP_ENABLED: "false"
+      JEV_ENABLED: "false"
+      JEV_ENDPOINT: ""
+      JEV_BASE_URL: ""
+      JEV_API_KEY: ""
+      LOCAL_LLM_BASE_URL: ""
+      GROQ_API_KEY: ""
+      TELEGRAM_BOT_TOKEN: ""
+      MAX_BOT_ENABLED: "false"
+      MAX_BOT_TOKEN: ""
+      MAX_WEBHOOK_URL: ""
+      MAX_WEBHOOK_SECRET: ""
+      ADMIN_COOKIE_SECURE: "false"
+      WEB_ORIGIN: http://127.0.0.1:13000
+      EVENT_SUBMISSION_PER_HOUR: ${EVENT_SUBMISSION_PER_HOUR:-10}
+  frontend:
+    ports: !override
+      - "127.0.0.1:13000:3000"
+    build:
+      args:
+        NEXT_PUBLIC_TELEGRAM_BOT_USERNAME: ""
+  bot:
+    profiles: ["disabled-e2e"]
+  maintenance:
+    profiles: ["disabled-e2e"]
+  gkz-collector:
+    profiles: ["disabled-e2e"]
+  venue-collector:
+    profiles: ["disabled-e2e"]
+  prometheus:
+    profiles: ["disabled-e2e"]
+  grafana:
+    profiles: ["disabled-e2e"]
+
+volumes:
+  pgdata_live:
+    name: br-afisha-e2e-pgdata
+  prometheusdata:
+    name: br-afisha-e2e-prometheusdata
+  grafanadata:
+    name: br-afisha-e2e-grafanadata
+
+networks:
+  default:
+    name: br-afisha-e2e-net

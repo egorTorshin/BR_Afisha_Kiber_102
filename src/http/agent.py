@@ -1,6 +1,7 @@
 """HTTP boundary for persistent, grounded agent conversations."""
 
 from typing import Literal
+import logging
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,6 +17,9 @@ from src.services.admin_auth import AdminAuth
 from src.services.agent_service import AgentService
 from src.services.user_service import UserService
 from src.services.speech_service import MAX_AUDIO_BYTES, SpeechUnavailable, transcribe_audio
+from src.utils.logger import get_logger, log_event
+
+logger = get_logger("afisha_rb.http.agent")
 
 
 class AgentChatInput(BaseModel):
@@ -44,6 +48,7 @@ def create_agent_router(database: Database, settings: Settings, auth: AdminAuth,
     )
     users = UserService(database)
 
+    @router.post("/agent/chat", response_model=AgentChatOutput, include_in_schema=False)
     @router.post("/api/v1/agent/chat", response_model=AgentChatOutput)
     def agent_chat(body: AgentChatInput, request: Request, response: Response):
         check_browser_origin(request, settings)
@@ -58,7 +63,12 @@ def create_agent_router(database: Database, settings: Settings, auth: AdminAuth,
                 raise HTTPException(403, "Диалог недоступен")
             token, conversation_id = service.create_browser_session()
 
-        result = service.chat(body.message, conversation_id, user_id=f"agent:{conversation_id}")
+        authenticated_user = users.session(request.cookies.get("user_session", ""))
+        principal = (f"user:{authenticated_user['id']}" if authenticated_user else
+                     f"web:{getattr(request.state, 'visitor_identity', None) or conversation_id}")
+        source_id = (request.client.host if request.client and not authenticated_user else None)
+        result = service.chat(body.message, conversation_id, user_id=principal,
+                              budget_source_id=source_id)
         response.set_cookie(
             "agent_session", token, httponly=True, samesite="lax",
             secure=settings.admin_cookie_secure, max_age=settings.dialogue_ttl_days * 86400, path="/",
@@ -80,9 +90,11 @@ def create_agent_router(database: Database, settings: Settings, auth: AdminAuth,
         try:
             return {"text": await transcribe_audio(audio, filename, request.headers.get("content-type", "audio/webm"), settings)}
         except ValueError as exc:
-            raise HTTPException(422, str(exc)) from None
+            log_event(logger, logging.WARNING, "Speech request rejected", exception_type=type(exc).__name__)
+            raise HTTPException(422, "Некорректная аудиозапись") from None
         except SpeechUnavailable as exc:
-            raise HTTPException(503, str(exc)) from None
+            log_event(logger, logging.ERROR, "Speech provider unavailable", exception_type=type(exc).__name__)
+            raise HTTPException(503, "Распознавание речи временно недоступно") from None
 
     @router.get("/api/v1/admin/agent/traces/{request_id}")
     def agent_trace(request_id: str, request: Request):

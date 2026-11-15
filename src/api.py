@@ -104,6 +104,7 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
                 if request.method in {"POST", "PATCH", "PUT"}:
                     client_ip = request.client.host if request.client else "unknown"
                     visitor, visitor_cookie = visitor_identity(request, settings.rate_limit_secret)
+                    request.state.visitor_identity = visitor
                     if path == "/api/v1/admin/login":
                         try:
                             username = str(json.loads(request._body).get("username", "")).strip().casefold()[:100]
@@ -113,15 +114,17 @@ def create_app(db: Optional[Database] = None, settings: Optional[Settings] = Non
                                   ("login:ip", client_ip, 200, 600)]
                         if username:
                             quotas.append(("login:account", username, 8, 600))
-                    elif path == "/feedback":
+                    elif path in {"/feedback", "/api/v1/feedback"}:
                         quotas = [("feedback:visitor", visitor, 10, 60),
                                   ("feedback:ip", client_ip, 200, 60)]
                     elif path == "/api/v1/event-submissions":
-                        quotas = [("event-submission:visitor", visitor, 3, 3600),
+                        quotas = [("event-submission:visitor", visitor, settings.event_submission_per_hour, 3600),
                                   ("event-submission:ip", client_ip, 30, 3600)]
-                    elif path == "/api/v1/agent/chat":
-                        identity = request.cookies.get("agent_session") or visitor
-                        quotas = [("agent-chat:session", identity, 30, 60),
+                    elif path.rstrip("/") in {"/agent/chat", "/api/v1/agent/chat"}:
+                        # Use the stable visitor identity from the first request too.
+                        # The first chat creates agent_session, so preferring that cookie
+                        # would split request 1 from requests 2..N and permit one extra hit.
+                        quotas = [("agent-chat:visitor", visitor, 30, 60),
                                   ("agent-chat:ip", client_ip, 300, 60)]
                     elif path == "/api/v1/speech/transcribe":
                         quotas = [("speech:visitor", visitor, 10, 60),

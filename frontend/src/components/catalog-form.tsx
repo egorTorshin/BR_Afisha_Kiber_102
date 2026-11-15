@@ -4,6 +4,7 @@ import Form from "next/form";
 import Link from "next/link";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { AgentChat } from "./agent-chat";
+import { SearchBar } from "./ui";
 import { eventsHref } from "@/lib/event-query";
 import type { CategoryItem, CityItem, EventFilters, VenueItem } from "@/lib/types";
 
@@ -68,7 +69,8 @@ export function CatalogForm({ filters, cities, categories }: { filters: EventFil
   return <>
     <div className="catalog-agent"><AgentChat compact /></div>
     <Form action="/" className="catalog-form" aria-label="Фильтры мероприятий">
-      {filters.query_text && <input type="hidden" name="query_text" value={filters.query_text} />}
+      <SearchBar key={filters.query_text || ""} defaultValue={filters.query_text || ""} />
+      <input type="hidden" name="page" value="1" />
       <div className="filter-controls" ref={root}>
         <div className="filter-triggers">
           <FilterChip active={Boolean(city)} expanded={open === "city"} onClick={(e) => toggle("city", e.currentTarget)}>{city || "Город"}</FilterChip>

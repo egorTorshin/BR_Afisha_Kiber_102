@@ -19,11 +19,17 @@ def normalize_text(text: str) -> str:
 
 
 def compute_dedup_key(title: str, date_start: str, city: str, venue: str) -> str:
+    """Stable event identity: normalized title + date + venue (city is a conflict check)."""
     norm_title = normalize_text(title)
-    norm_city = normalize_text(city)
     norm_venue = normalize_text(venue)
-    day_part = (date_start or "")[:16]  # YYYY-MM-DDTHH:MM
-    raw = f"{norm_title}|{day_part}|{norm_city}|{norm_venue}"
+    day_part = (date_start or "")[:16]  # normalized local date and start time
+    raw = f"{norm_title}|{day_part}|{norm_venue}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def compute_city_conflict_key(title: str, date_start: str, city: str, venue: str) -> str:
+    """Separate identity for a same-name venue in another city under the legacy unique index."""
+    raw = f"{compute_dedup_key(title, date_start, city, venue)}|city:{normalize_text(city)}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
@@ -107,18 +113,21 @@ def resolve_city(raw_city: str, db: Optional[Database] = None) -> Optional[str]:
             {"name": "Ишимбай", "normalized_name": "ишимбай", "aliases_json": '["ишимбае"]'},
         ]
 
-    # 1. Exact or alias match
+    # Exact names and aliases take precedence, but conflicting dictionary entries
+    # must not make the resolver silently choose whichever row happens to come first.
+    exact_matches = set()
     for rec in city_records:
-        if norm == rec["normalized_name"]:
-            return rec["name"]
         aliases = [normalize_text(x) for x in json.loads(rec.get("aliases_json") or "[]")]
-        if norm in aliases:
-            return rec["name"]
+        if norm == rec["normalized_name"] or norm in aliases:
+            exact_matches.add(rec["name"])
+    if len(exact_matches) == 1:
+        return next(iter(exact_matches))
+    if exact_matches:
+        return None
 
     # 2. Fuzzy match (Damerau-Levenshtein <= 2 for words >= 5 chars)
     if len(norm) >= 4:
-        best_city = None
-        best_dist = 999
+        city_distances: Dict[str, int] = {}
         for rec in city_records:
             candidates = [rec["normalized_name"]] + [
                 normalize_text(x) for x in json.loads(rec.get("aliases_json") or "[]")
@@ -128,11 +137,13 @@ def resolve_city(raw_city: str, db: Optional[Database] = None) -> Optional[str]:
                     continue
                 dist = _damerau_levenshtein(norm, cand)
                 max_allowed = 2 if len(cand) >= 6 else 1
-                if dist <= max_allowed and dist < best_dist:
-                    best_dist = dist
-                    best_city = rec["name"]
-        if best_city:
-            return best_city
+                if dist <= max_allowed:
+                    city_distances[rec["name"]] = min(city_distances.get(rec["name"], 999), dist)
+        if city_distances:
+            best_dist = min(city_distances.values())
+            best_cities = [city for city, dist in city_distances.items() if dist == best_dist]
+            if len(best_cities) == 1:
+                return best_cities[0]
 
     return None
 

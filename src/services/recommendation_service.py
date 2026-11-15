@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from math import asin, ceil, cos, exp, radians, sin, sqrt
+from math import asin, cos, exp, radians, sin, sqrt
 from statistics import median
 from typing import Optional
 
@@ -34,7 +34,7 @@ class ItineraryStop:
     event: EventRecord
     start_time: datetime
     end_time: datetime
-    travel_from_previous_min: int
+    travel_from_previous_min: Optional[int]
     unit_price: int
     party_price: int
 
@@ -43,9 +43,10 @@ class ItineraryStop:
 class WeekendPlanResult:
     stops: list[ItineraryStop]
     total_price: int
-    total_travel_min: int
+    total_travel_min: Optional[int]
     target_count: int
     conflict_explanation: Optional[str] = None
+    recommendations: list[tuple[EventRecord, str]] | None = None
 
 
 def _grams(value: str) -> Counter[str]:
@@ -323,18 +324,16 @@ class RecommendationService:
         return selected
 
     @staticmethod
-    def _travel_minutes(left: EventRecord, right: EventRecord) -> int:
-        if (normalize_text(left.city) == normalize_text(right.city)
-                and (normalize_text(left.address) == normalize_text(right.address)
-                     or normalize_text(left.venue) == normalize_text(right.venue))):
+    def _travel_minutes(left: EventRecord, right: EventRecord) -> Optional[int]:
+        same_address = normalize_text(left.address) and normalize_text(left.address) == normalize_text(right.address)
+        same_venue = normalize_text(left.venue) and normalize_text(left.venue) == normalize_text(right.venue)
+        if normalize_text(left.city) == normalize_text(right.city) and (same_address or same_venue):
             return 0
-        if None not in (left.lat, left.lon, right.lat, right.lon):
-            distance = _distance_km(left.lat, left.lon, right.lat, right.lon)
-            return max(10, ceil(distance * 1.3 / 24.0 * 60.0))
-        return 15 if normalize_text(left.city) == normalize_text(right.city) else 60
+        # Coordinates alone do not establish a drivable or walkable route time.
+        return None
 
     @staticmethod
-    def _end_time(event: EventRecord, start: datetime) -> datetime:
+    def _end_time(event: EventRecord, start: datetime) -> Optional[datetime]:
         if event.date_end:
             try:
                 end = datetime.fromisoformat(event.date_end).replace(tzinfo=None)
@@ -344,7 +343,9 @@ class RecommendationService:
                     return end
             except ValueError:
                 pass
-        return start + timedelta(minutes=event.duration_min if event.duration_min and event.duration_min > 0 else 90)
+        if event.duration_min is not None and event.duration_min > 0:
+            return start + timedelta(minutes=event.duration_min)
+        return None
 
     def _plan_candidates(self, city: Optional[str], date_from: str, date_to: str,
                          max_age_limit: Optional[int]) -> list[tuple[EventRecord, datetime, datetime, int]]:
@@ -359,8 +360,26 @@ class RecommendationService:
                 start = datetime.fromisoformat(event.date_start).replace(tzinfo=None)
             except ValueError:
                 continue
-            prepared.append((event, start, self._end_time(event, start), price))
+            end = self._end_time(event, start)
+            if end is None:
+                continue
+            prepared.append((event, start, end, price))
         return prepared
+
+    def _unknown_duration_recommendations(self, city: Optional[str], date_from: str, date_to: str,
+                                          max_age_limit: Optional[int]) -> list[tuple[EventRecord, str]]:
+        recommendations = []
+        for event in self._published(city=city, date_from=date_from, date_to=date_to):
+            if max_age_limit is not None and event.age_limit > max_age_limit:
+                continue
+            try:
+                start = datetime.fromisoformat(event.date_start).replace(tzinfo=None)
+            except ValueError:
+                continue
+            if self._end_time(event, start) is None:
+                recommendations.append((event, "Длительность неизвестна; событие не включено в расписание."))
+        self._with_sources([event for event, _ in recommendations])
+        return recommendations
 
     def _solve_plan(self, candidates: list[tuple[EventRecord, datetime, datetime, int]],
                     party_size: int, target_count: int, budget: Optional[int],
@@ -379,9 +398,9 @@ class RecommendationService:
             for right in range(left + 1, count):
                 right_event, start, _, _ = candidates[right]
                 leg = self._travel_minutes(left_event, right_event)
-                if travel_limit is not None and leg > travel_limit:
+                if leg is not None and travel_limit is not None and leg > travel_limit:
                     continue
-                if end + timedelta(minutes=leg + 15) <= start:
+                if (end + timedelta(minutes=leg + 15) <= start if leg is not None else end <= start):
                     edges[left].append((right, leg))
 
         # State: (path, total_cost, total_travel, largest_leg).
@@ -420,8 +439,8 @@ class RecommendationService:
                         next_cost = cost + costs[next_index]
                         if budget is not None and next_cost > budget:
                             continue
-                        next_travel = travel_sum + leg
-                        next_bottleneck = max(bottleneck, leg)
+                        next_travel = travel_sum + (leg or 0)
+                        next_bottleneck = max(bottleneck, leg or 0)
                         key = (next_index, categories | {candidates[next_index][0].category})
                         frontier = next_frontiers.setdefault(key, [])
                         if any(old[1] <= next_cost and old[2] <= next_travel and old[3] <= next_bottleneck
@@ -451,6 +470,8 @@ class RecommendationService:
         if first > last:
             raise ValueError("date_from must not be after date_to")
         candidates = self._plan_candidates(city, first.isoformat(), last.isoformat(), max_age_limit)
+        recommendations = self._unknown_duration_recommendations(
+            city, first.isoformat(), last.isoformat(), max_age_limit)
         path, total_price, travel, _ = self._solve_plan(
             candidates, party_size, target_count, max_budget_total, max_travel_min)
         stops: list[ItineraryStop] = []
@@ -459,8 +480,13 @@ class RecommendationService:
             leg = self._travel_minutes(stops[-1].event, event) if stops else 0
             stops.append(ItineraryStop(event, start, end, leg, unit_price, unit_price * party_size))
         self._with_sources([stop.event for stop in stops])
+        unknown_travel = any(stop.travel_from_previous_min is None for stop in stops[1:])
+        if unknown_travel:
+            conflict = ("Предложенный порядок событий не подтверждает время переезда: "
+                        "нет данных маршрутизации. Соблюдение лимита перемещения не подтверждено.")
+        else:
+            conflict = None
 
-        conflict = None
         if len(stops) < target_count:
             if max_budget_total is not None:
                 relaxed, required, _, _ = self._solve_plan(
@@ -501,4 +527,9 @@ class RecommendationService:
             if conflict is None:
                 conflict = (f"В выбранных условиях нет маршрута из {target_count} опубликованных "
                             "событий с заданными ограничениями.")
-        return WeekendPlanResult(stops, total_price, travel, target_count, conflict)
+        if unknown_travel and len(stops) < target_count:
+            travel_warning = ("Предложенный порядок событий не подтверждает время переезда: "
+                              "нет данных маршрутизации. Соблюдение лимита перемещения не подтверждено.")
+            conflict = f"{conflict} {travel_warning}" if conflict else travel_warning
+        total_travel = None if unknown_travel else travel
+        return WeekendPlanResult(stops, total_price, total_travel, target_count, conflict, recommendations)

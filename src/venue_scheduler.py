@@ -30,7 +30,7 @@ def main() -> None:
             for venue in VENUES:
                 if stopped:
                     break
-                collector = VenueCollector(venue)
+                collector = VenueCollector(venue, timeout=float(os.getenv("VENUE_COLLECTION_TIMEOUT_SECONDS", "20")))
                 try:
                     result = collector.run(ImportService(db))
                     all_succeeded = all_succeeded and result.ok

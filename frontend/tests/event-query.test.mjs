@@ -70,3 +70,45 @@ test("card titles omit only a trailing edition number", () => {
   assert.equal(cardTitle("Концерт в Уфе (выпуск №51)"), "Концерт в Уфе");
   assert.equal(cardTitle("Выставка (выпуск №3) в Уфе"), "Выставка (выпуск №3) в Уфе");
 });
+
+test("malformed numeric filters are omitted and URL values are encoded", () => {
+  const filters = parseEventQuery({
+    max_price: "не число",
+    max_duration_min: "2.5",
+    city: "Уфа & Салават",
+    query_text: "Курай концерт",
+  });
+  assert.equal(filters.max_price, undefined);
+  assert.equal(filters.max_duration_min, undefined);
+  const url = new URL(eventsHref(filters), "http://localhost");
+  assert.equal(url.searchParams.get("city"), "Уфа & Салават");
+  assert.equal(url.searchParams.get("query_text"), "Курай концерт");
+  assert.equal(filters.page, 1);
+  assert.equal(filters.page_size, 12);
+});
+
+test("catalog search submission stores the title query and starts at page one", () => {
+  const submitted = new URL(eventsHref({ query_text: "Курай концерт", city: "Уфа", page: 1, page_size: 24, sort: "price_asc" }), "http://localhost");
+  assert.equal(submitted.searchParams.get("query_text"), "Курай концерт");
+  assert.equal(submitted.searchParams.get("page"), "1");
+  assert.equal(parseEventQuery(Object.fromEntries(submitted.searchParams)).query_text, "Курай концерт");
+});
+
+test("catalog search restores from URL and combines with filters", () => {
+  const filters = parseEventQuery({ query_text: "театр", city: "Уфа", category: "спектакль", page: "4", max_price: "500" });
+  assert.equal(filters.query_text, "театр");
+  const submitted = new URL(eventsHref({ ...filters, page: 1 }), "http://localhost");
+  assert.equal(submitted.searchParams.get("query_text"), "театр");
+  assert.equal(submitted.searchParams.get("city"), "Уфа");
+  assert.equal(submitted.searchParams.get("category"), "спектакль");
+  assert.equal(submitted.searchParams.get("max_price"), "500");
+  assert.equal(submitted.searchParams.get("page"), "1");
+});
+
+test("clearing the catalog query removes it while retaining other filters", () => {
+  const filters = parseEventQuery({ query_text: "театр", city: "Уфа", page: "3" });
+  const cleared = new URL(eventsHref({ ...filters, query_text: "", page: 1 }), "http://localhost");
+  assert.equal(cleared.searchParams.has("query_text"), false);
+  assert.equal(cleared.searchParams.get("city"), "Уфа");
+  assert.equal(cleared.searchParams.get("page"), "1");
+});

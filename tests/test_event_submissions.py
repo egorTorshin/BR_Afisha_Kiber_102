@@ -61,6 +61,24 @@ def test_public_endpoint_creates_pending_proposal(db):
         assert client.get("/api/v1/admin/submissions").status_code in (401, 503)
 
 
+def test_public_submission_rate_limit_allows_three_then_returns_retry_after(db):
+    settings = Settings(rate_limit_secret="event-submission-test-secret-32chars", event_submission_per_hour=3)
+    with TestClient(create_app(db, settings)) as client:
+        # Health, reads, and authentication have separate/no quotas for submissions.
+        assert client.get("/health").status_code == 200
+        assert client.get("/api/v1/events").status_code == 200
+        assert client.post("/api/v1/admin/login", json={"username": "nobody", "password": "wrong"}).status_code == 401
+        for i in range(3):
+            response = client.post("/api/v1/event-submissions", json=event(
+                title=f"Заявка {i}", source_url=f"https://example.com/rate-{i}"))
+            assert response.status_code == 201, response.text
+        limited = client.post("/api/v1/event-submissions", json=event(
+            title="Четвертая заявка", source_url="https://example.com/rate-4"))
+        assert limited.status_code == 429
+        assert limited.headers["Retry-After"] == "3600"
+        assert limited.json()["error"]["code"] == "HTTP_429"
+
+
 def test_moderator_approval_requires_csrf_and_publishes(db):
     settings = Settings(admin_username="reviewer", admin_password="test-password", admin_cookie_secure=False)
     with TestClient(create_app(db, settings)) as client:

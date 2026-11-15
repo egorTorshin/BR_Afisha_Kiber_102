@@ -2,9 +2,12 @@
 
 import time
 from dataclasses import dataclass
+from dataclasses import replace
+from decimal import Decimal
 from typing import Literal
 
 from src.agent.decision_router import DecisionRouter
+from src.agent.budget import SqlAgentBudgetRepository, estimate_request_cost
 from src.agent.heavy_llm import HeavyLLMProvider
 from src.agent.light_llm import LightLLMProvider
 from src.agent.smart import SmartProvider
@@ -61,6 +64,7 @@ class AgentService:
         self.subscriptions = SubscriptionService(database, settings.subscription_retention_days)
         self.dialogue_repo = SqlDialogueStateRepository(database, settings.dialogue_ttl_days)
         self.trace_repo = SqlAgentTraceRepository(database)
+        self.budget_repo = SqlAgentBudgetRepository(database, settings.rate_limit_secret)
         self.sessions = AgentSessionRepository(
             database,
             settings.dialogue_ttl_days,
@@ -101,6 +105,7 @@ class AgentService:
         conversation_id: str,
         *,
         user_id: str | None = None,
+        budget_source_id: str | None = None,
         request_id: str | None = None,
     ) -> AgentRunResult:
         self.cleanup_expired()
@@ -108,29 +113,71 @@ class AgentService:
         if not conversation_id:
             raise ValueError("conversation_id is required")
         principal = user_id or f"agent:{conversation_id}"
-        registry = create_tool_registry(
-            self.search,
-            self.subscriptions,
-            self.feedback,
-            user_id=principal,
-        )
-        orchestrator = AgentOrchestrator(
-            registry,
-            self.search,
-            self.router_factory(self.settings),
-            self.light_factory(self.settings, registry),
-            self.heavy_factory(self.settings, registry),
-            smart=self.smart_factory(self.settings, registry),
-            structured=self.structured_factory(self.settings, registry),
-            state_repository=self.dialogue_repo,
-            trace_repository=self.trace_repo,
-            settings=self.settings,
-        )
         rid = request_id or get_request_id()
-        response = orchestrator.run(
-            AgentRequest(message=message, conversation_id=conversation_id, request_id=rid)
-        )
+        run_settings = self.settings
+        budget_blocked = False
+        budget_block_reason = None
+        reserved = False
+        if self.settings.ai_mode != "no-ai":
+            estimate = estimate_request_cost(self.settings, message)
+            denied_scope = "unpriced" if estimate is None else self.budget_repo.reserve(
+                request_id=rid,
+                conversation_id=conversation_id,
+                user_id=principal,
+                amount=estimate,
+                dialogue_limit=self.settings.agent_dialogue_cost_limit_usd,
+                daily_limit=self.settings.agent_daily_user_cost_limit_usd,
+                source_id=budget_source_id,
+            )
+            if denied_scope:
+                budget_blocked = True
+                budget_block_reason = denied_scope
+                run_settings = replace(self.settings, ai_mode="no-ai")
+            else:
+                reserved = True
+        try:
+            registry = create_tool_registry(
+                self.search,
+                self.subscriptions,
+                self.feedback,
+                user_id=principal,
+            )
+            orchestrator = AgentOrchestrator(
+                registry,
+                self.search,
+                self.router_factory(run_settings),
+                self.light_factory(run_settings, registry),
+                self.heavy_factory(run_settings, registry),
+                smart=self.smart_factory(run_settings, registry),
+                structured=self.structured_factory(run_settings, registry),
+                state_repository=self.dialogue_repo,
+                trace_repository=self.trace_repo,
+                settings=run_settings,
+            )
+            response = orchestrator.run(
+                AgentRequest(message=message, conversation_id=conversation_id, request_id=rid)
+            )
+        except Exception:
+            if reserved:
+                self.budget_repo.release(rid)
+            raise
         trace = self.trace_repo.get(response.trace_id)
+        if reserved:
+            actual_cost = trace.cost if trace and trace.cost is not None else Decimal(0)
+            self.budget_repo.settle(rid, actual_cost)
+        if budget_blocked:
+            notice = ("Выполняю обычный поиск без ИИ.\n" if budget_block_reason == "unpriced"
+                      else "Лимит расходов достигнут. Выполняю обычный поиск.\n")
+            response.message = notice + response.message
+            if trace is not None:
+                trace.fallback_reason = ("agent_cost_unavailable" if budget_block_reason == "unpriced"
+                                         else "agent_budget_limit_exceeded")
+                trace.plan_summary = (trace.plan_summary or "") + "; budget=ordinary_search"
+                self.trace_repo.update(conversation_id, trace)
+                state = self.dialogue_repo.get(conversation_id)
+                if state and state.turns:
+                    state.turns[-1].content = response.message
+                    self.dialogue_repo.save(state)
         status = response_status(
             trace.stop_reason if trace else "internal_error",
             trace.fallback_reason if trace else None,

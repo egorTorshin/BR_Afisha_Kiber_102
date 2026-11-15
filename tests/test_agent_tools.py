@@ -197,3 +197,18 @@ def test_registry_is_allowlisted_and_hides_service_errors(catalog, monkeypatch):
     assert result.error.code == "internal_error"
     assert "secret" not in result.model_dump_json()
 
+
+def test_tool_timeout_returns_empty_safe_error(catalog, monkeypatch):
+    registry = catalog[0]
+
+    def timed_out(*_args, **_kwargs):
+        raise TimeoutError("upstream timeout with private request details")
+
+    monkeypatch.setattr(SearchService, "search", timed_out)
+    result = registry.execute("search_events", {"city": "Уфа"})
+
+    assert result.error.code == "internal_error"
+    assert result.payload is None
+    assert result.result_ids == []
+    assert "private request details" not in result.model_dump_json()
+

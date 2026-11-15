@@ -171,17 +171,23 @@ class ItineraryStopItem(BaseModel):
     event: PublicEvent
     start_time: datetime
     end_time: datetime
-    travel_from_previous_min: int
+    travel_from_previous_min: Optional[int]
     unit_price: int
     party_price: int
+
+
+class PlannerRecommendation(BaseModel):
+    event: PublicEvent
+    warning: str
 
 
 class WeekendPlanResponse(BaseModel):
     stops: list[ItineraryStopItem]
     total_price: int
-    total_travel_min: int
+    total_travel_min: Optional[int]
     target_count: int
     conflict_explanation: Optional[str] = None
+    recommendations: list[PlannerRecommendation] = Field(default_factory=list)
 
 
 class AdminEvent(PublicEvent):
@@ -216,10 +222,10 @@ class EventPage(BaseModel):
 
 
 class EventFilters(BaseModel):
-    query_text: Optional[str] = Field(default=None, max_length=200)
-    city: Optional[str] = Field(default=None, max_length=120)
+    query_text: Optional[str] = Field(default=None, max_length=200, examples=["оркестр"])
+    city: Optional[str] = Field(default=None, max_length=120, examples=["Уфа"])
     venue: Optional[str] = Field(default=None, max_length=250)
-    category: Optional[str] = Field(default=None, max_length=100)
+    category: Optional[str] = Field(default=None, max_length=100, examples=["концерт"])
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     time_after: Optional[str] = None

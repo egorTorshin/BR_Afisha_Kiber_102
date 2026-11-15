@@ -25,6 +25,41 @@ CATEGORY_ICONS = {
     "другое": "✨",
 }
 
+# Telegram allows 4096 characters after entity parsing. Keep additional room for
+# platform differences and count the actual HTML payload (including escaping).
+TELEGRAM_CARD_MAX_LENGTH = 3800
+
+
+def telegram_payload_length(text: str) -> int:
+    # Telegram entity offsets use UTF-16 code units; counting the serialized HTML
+    # also conservatively includes markup and escaped entities.
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _fit_card_description(render: Any, description: str) -> str:
+    """Render a card with a shortened description when its serialized text is too long."""
+    full = render(description)
+    if telegram_payload_length(full) <= TELEGRAM_CARD_MAX_LENGTH:
+        return full
+
+    marker = "…"
+    # Find the longest escaped description that fits; all non-description fields
+    # (including links) are rendered unchanged on every iteration.
+    low, high = 0, len(description)
+    best = render("")
+    if telegram_payload_length(best) > TELEGRAM_CARD_MAX_LENGTH:
+        # Irreducibly long metadata/URLs cannot be shortened without losing fields.
+        return best
+    while low <= high:
+        mid = (low + high) // 2
+        candidate = render(description[:mid] + (marker if mid < len(description) else ""))
+        if telegram_payload_length(candidate) <= TELEGRAM_CARD_MAX_LENGTH:
+            best = candidate
+            low = mid + 1
+        else:
+            high = mid - 1
+    return best
+
 
 def category_badge(category: str) -> str:
     cat_low = (category or "другое").lower()
@@ -213,21 +248,21 @@ def format_event_card(ev: EventRecord, language: str = "ru") -> str:
         tags_str = ", ".join(f"#{html.escape(t)}" for t in ev.tags[:6])
         lines.append(f"🏷 <b>{tags_l}:</b> {tags_str}")
 
-    lines.append(f"\n📖 <b>{desc_l}:</b>\n{html.escape(ev.description)}")
+    def render(description: str) -> str:
+        card_lines = [*lines, f"\n📖 <b>{desc_l}:</b>\n{html.escape(description)}"]
+        if ev.org_link:
+            card_lines.append(f"🎟 <b>{tickets_l}:</b> {html.escape(ev.org_link)}")
+        sources = ev.sources or []
+        if sources:
+            for source in sources:
+                card_lines.append(f"🔗 <b>{source_l}:</b> {html.escape(source.source_type)} — {html.escape(source.source_url)}")
+        else:
+            card_lines.append(f"🔗 <b>{source_l}:</b> {html.escape(ev.source_url)}")
+        if ev.is_disputed and ev.dispute_reason:
+            card_lines.append(f"\n🔎 <i>Отметка модерации: {html.escape(ev.dispute_reason)}</i>")
+        return "\n".join(card_lines)
 
-    if ev.org_link:
-        lines.append(f"🎟 <b>{tickets_l}:</b> {html.escape(ev.org_link)}")
-    sources = ev.sources or []
-    if sources:
-        for source in sources:
-            lines.append(f"🔗 <b>{source_l}:</b> {html.escape(source.source_type)} — {html.escape(source.source_url)}")
-    else:
-        lines.append(f"🔗 <b>{source_l}:</b> {html.escape(ev.source_url)}")
-
-    if ev.is_disputed and ev.dispute_reason:
-        lines.append(f"\n🔎 <i>Отметка модерации: {html.escape(ev.dispute_reason)}</i>")
-
-    return "\n".join(lines)
+    return _fit_card_description(render, ev.description or "")
 
 
 def format_search_results(

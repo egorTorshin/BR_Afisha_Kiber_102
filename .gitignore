@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 .env
+.env.e2e
 *.db
 *.sqlite3
 *.zip

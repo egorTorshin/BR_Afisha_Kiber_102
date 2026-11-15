@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/event-query.test.mjs",
+    "test": "node --experimental-strip-types --test tests/event-query.test.mjs tests/admin-contract.test.mjs tests/admin-import.test.mjs",
     "smoke:embed": "node --test tests/embed-smoke.test.mjs"
   },
   "dependencies": {

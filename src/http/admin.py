@@ -200,7 +200,9 @@ def create_admin_router(database: Database, settings: Settings, auth: AdminAuth)
                 return importer.import_records(records, source_file=filename, actor=actor, source_type="страница")
             return importer.import_from_content(content, filename, suffix, actor=actor,
                                                 max_rows=settings.max_import_rows)
-        except (UnicodeError, ValueError, TypeError, KeyError) as exc:
+        except UnicodeError as exc:
+            raise HTTPException(422, "Некорректная кодировка файла импорта. Используйте UTF-8.") from None
+        except (ValueError, TypeError, KeyError) as exc:
             raise HTTPException(422, "Не удалось прочитать импорт") from exc
 
     @router.get("/api/v1/admin/feedback", response_model=list[FeedbackRecord])

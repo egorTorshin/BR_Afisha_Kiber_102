@@ -7,6 +7,7 @@ import time
 import os
 from src.utils.metrics import BOT_REQUESTS, BOT_LATENCY
 from src.bot.router import BotResponse, BotRouter
+from src.bot.formatter import telegram_payload_length
 from src.config import Settings
 from src.services.speech_service import MAX_AUDIO_BYTES, MAX_AUDIO_DURATION_SECONDS, SpeechUnavailable, transcribe_audio
 from src.utils.logger import get_logger, log_event, request_id_ctx, new_request_id
@@ -53,6 +54,14 @@ class TelegramPollingRunner:
         )
         return httpx.AsyncClient(transport=transport, timeout=timeout, limits=limits)
 
+    def _bounded_message_text(self, text: str, parse_mode: str) -> str:
+        """Final Telegram API guard; HTML payload length includes escaped text and markup."""
+        if telegram_payload_length(text) <= 4096:
+            return text
+        log_event(self.logger, logging.ERROR, "Telegram message exceeds API length limit",
+                  payload_length=telegram_payload_length(text), parse_mode=parse_mode)
+        return "❌ Не удалось сформировать сообщение: превышен допустимый размер."
+
     async def _setup_bot_commands(self, client: httpx.AsyncClient) -> None:
         try:
             await client.post(
@@ -61,6 +70,8 @@ class TelegramPollingRunner:
             )
             commands = [
                 {"command": "start", "description": "🏠 Начать работу с ботом"},
+                {"command": "help", "description": "ℹ️ Справка и список команд"},
+                {"command": "cancel", "description": "❌ Отменить действие и сбросить фильтры"},
             ]
             await client.post(f"{self.base_url}/setMyCommands", json={"commands": commands})
             me_resp = await client.get(f"{self.base_url}/getMe")
@@ -96,6 +107,7 @@ class TelegramPollingRunner:
         delete_previous_bot_msg: bool = True,
     ) -> Optional[int]:
         old_msg_id = self._last_bot_message.get(chat_id)
+        text = self._bounded_message_text(text, parse_mode)
         payload: Dict[str, Any] = {
             "chat_id": chat_id,
             "text": text,
@@ -127,6 +139,7 @@ class TelegramPollingRunner:
         parse_mode: str = "HTML",
     ) -> None:
         """Редактирует существующее сообщение на месте (editMessageText). Если сообщение устарело — заменяет его."""
+        text = self._bounded_message_text(text, parse_mode)
         payload: Dict[str, Any] = {
             "chat_id": chat_id,
             "message_id": message_id,
@@ -226,9 +239,16 @@ class TelegramPollingRunner:
                         if len(content_bytes) > max_bytes:
                             bot_resp = BotResponse(text="❌ Файл импорта слишком большой.")
                         else:
-                            bot_resp = self.router.handle_document_upload(
-                                user_id, file_name, content_bytes.decode("utf-8-sig")
-                            )
+                            try:
+                                content = content_bytes.decode("utf-8-sig")
+                            except UnicodeDecodeError:
+                                bot_resp = BotResponse(
+                                    text="❌ Некорректная кодировка файла импорта. Используйте UTF-8."
+                                )
+                            else:
+                                bot_resp = self.router.handle_document_upload(
+                                    user_id, file_name, content
+                                )
                     await self.send_new_screen(
                         client, chat_id, bot_resp.text, bot_resp.reply_markup,
                         bot_resp.parse_mode, delete_previous_bot_msg=False,

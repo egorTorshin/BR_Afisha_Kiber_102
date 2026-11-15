@@ -1,5 +1,5 @@
 import { api, ApiError } from "@/lib/api";
-import { formatDate } from "@/components/ui";
+import { formatDate } from "@/lib/format-date";
 import type { EventFilters } from "@/lib/types";
 import { cardTitle } from "@/lib/event-title";
 import styles from "./widget.module.css";

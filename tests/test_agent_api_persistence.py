@@ -48,7 +48,10 @@ def settings(**changes):
         "admin_cookie_secure": False,
         "ai_mode": "local-ai",
         "rate_limit_secret": "test-rate-limit-secret-with-32-characters",
-        "model_prices": {"light-test": {"input": "1", "output": "2"}},
+        "model_prices": {
+            "light-test": {"input": "1", "output": "2"},
+            "qwen2.5-3b-local": {"input": "1", "output": "2"},
+        },
     }
     values.update(changes)
     return Settings(**values)

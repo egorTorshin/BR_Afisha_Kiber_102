@@ -202,6 +202,18 @@ def test_search_business_result_is_shared_between_telegram_and_max(db):
     assert max_keyboard(max_result.reply_markup)
 
 
+def test_callback_payload_is_not_written_to_logs(db, monkeypatch):
+    import src.bot.router as router_module
+
+    logged = []
+    monkeypatch.setattr(router_module, "log_event", lambda *args, **kwargs: logged.append(kwargs))
+    router = BotRouter(db, Settings(), platform="max")
+    router.handle_callback("user-1", "private-payload-with-user-data")
+    callback_log = next(fields for fields in logged if "callback_length" in fields)
+    assert callback_log["callback_length"] == len("private-payload-with-user-data")
+    assert "callback" not in callback_log
+
+
 def test_webhook_deduplication_key_and_configuration(db):
     runner = MaxWebhookRunner("token", "https://bots.example.org/webhook", "s" * 20,
                               BotRouter(db, Settings(), platform="max"))

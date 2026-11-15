@@ -1,0 +1,232 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e1]:
+  - link "Перейти к содержимому" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - complementary [ref=e5]:
+        - link "Афиша Башкортостан — главная" [ref=e6] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e8]:
+            - strong [ref=e9]: Афиша
+            - generic [ref=e10]: Башкортостан
+        - generic [ref=e12]: Администратор
+        - navigation "Разделы админ-панели" [ref=e13]:
+          - button "Обзор" [ref=e14] [cursor=pointer]:
+            - img [ref=e15]
+            - generic [ref=e20]: Обзор
+          - button "События" [active] [ref=e21] [cursor=pointer]:
+            - img [ref=e22]
+            - generic [ref=e24]: События
+          - button "Модерация" [ref=e25] [cursor=pointer]:
+            - img [ref=e26]
+            - generic [ref=e29]: Модерация
+          - button "Заявки" [ref=e30] [cursor=pointer]:
+            - img [ref=e31]
+            - generic [ref=e34]: Заявки
+          - button "Пользователи" [ref=e35] [cursor=pointer]:
+            - img [ref=e36]
+            - generic [ref=e41]: Пользователи
+          - button "Логи и история" [ref=e42] [cursor=pointer]:
+            - img [ref=e43]
+            - generic [ref=e48]: Логи и история
+          - button "Мониторинг" [ref=e49] [cursor=pointer]:
+            - img [ref=e50]
+            - generic [ref=e52]: Мониторинг
+          - button "Настройки" [ref=e53] [cursor=pointer]:
+            - img [ref=e54]
+            - generic [ref=e57]: Настройки
+        - button "Выйти" [ref=e58] [cursor=pointer]:
+          - img [ref=e59]
+          - generic [ref=e62]: Выйти
+      - generic [ref=e63]:
+        - generic [ref=e64]:
+          - generic [ref=e65]:
+            - generic [ref=e66]: Панель управления
+            - heading "События" [level=1] [ref=e67]
+          - generic [ref=e68]:
+            - generic [ref=e69]:
+              - img [ref=e70]
+              - textbox "Поиск по панели" [ref=e73]:
+                - /placeholder: Поиск
+            - generic [ref=e74]: А
+          - generic [ref=e75]:
+            - button "Choose File" [ref=e76]
+            - button "Импорт CSV/JSON" [ref=e77] [cursor=pointer]
+        - generic [ref=e78]:
+          - generic [ref=e79]:
+            - textbox "Название, город или площадка" [ref=e80]
+            - combobox "Статус" [ref=e81]:
+              - option "Все статусы" [selected]
+              - option "Опубликовано"
+              - option "Черновик"
+              - option "Отменено"
+            - button "Найти" [ref=e82] [cursor=pointer]
+          - button "＋ Создать событие" [ref=e83] [cursor=pointer]
+        - table [ref=e85]:
+          - rowgroup [ref=e86]:
+            - row "Название Город Дата Статус Действия" [ref=e87]:
+              - cell "Название" [ref=e88]
+              - cell "Город" [ref=e89]
+              - cell "Дата" [ref=e90]
+              - cell "Статус" [ref=e91]
+              - cell "Действия" [ref=e92]
+          - rowgroup [ref=e93]:
+            - row "E2E 3a20fa8c-4a73-4e57-8bf4-ed681ff76877 Площадка E2E 3a20fa8c-4a73-4e57-8bf4-ed681ff76877 Уфа 30 дек. 2026 г. Опубликовано" [ref=e94]:
+              - cell "E2E 3a20fa8c-4a73-4e57-8bf4-ed681ff76877 Площадка E2E 3a20fa8c-4a73-4e57-8bf4-ed681ff76877" [ref=e95]:
+                - strong [ref=e96]: E2E 3a20fa8c-4a73-4e57-8bf4-ed681ff76877
+                - generic [ref=e97]: Площадка E2E 3a20fa8c-4a73-4e57-8bf4-ed681ff76877
+              - cell "Уфа" [ref=e98]:
+                - generic [ref=e99]:
+                  - img [ref=e100]
+                  - text: Уфа
+              - cell "30 дек. 2026 г." [ref=e103]
+              - cell "Опубликовано" [ref=e104]
+              - cell [ref=e105]:
+                - group [ref=e106]:
+                  - generic "Действия с событием" [ref=e107] [cursor=pointer]:
+                    - img [ref=e108]
+            - row "E2E 5bd83448-8dcf-428e-a06b-74bc666c8c8b Площадка E2E 5bd83448-8dcf-428e-a06b-74bc666c8c8b Уфа 30 дек. 2026 г. Опубликовано" [ref=e112]:
+              - cell "E2E 5bd83448-8dcf-428e-a06b-74bc666c8c8b Площадка E2E 5bd83448-8dcf-428e-a06b-74bc666c8c8b" [ref=e113]:
+                - strong [ref=e114]: E2E 5bd83448-8dcf-428e-a06b-74bc666c8c8b
+                - generic [ref=e115]: Площадка E2E 5bd83448-8dcf-428e-a06b-74bc666c8c8b
+              - cell "Уфа" [ref=e116]:
+                - generic [ref=e117]:
+                  - img [ref=e118]
+                  - text: Уфа
+              - cell "30 дек. 2026 г." [ref=e121]
+              - cell "Опубликовано" [ref=e122]
+              - cell [ref=e123]:
+                - group [ref=e124]:
+                  - generic "Действия с событием" [ref=e125] [cursor=pointer]:
+                    - img [ref=e126]
+            - row "E2E 5f315507-e295-42f2-8d58-bb1e51e4dbdc Площадка E2E 5f315507-e295-42f2-8d58-bb1e51e4dbdc Уфа 30 дек. 2026 г. Опубликовано" [ref=e130]:
+              - cell "E2E 5f315507-e295-42f2-8d58-bb1e51e4dbdc Площадка E2E 5f315507-e295-42f2-8d58-bb1e51e4dbdc" [ref=e131]:
+                - strong [ref=e132]: E2E 5f315507-e295-42f2-8d58-bb1e51e4dbdc
+                - generic [ref=e133]: Площадка E2E 5f315507-e295-42f2-8d58-bb1e51e4dbdc
+              - cell "Уфа" [ref=e134]:
+                - generic [ref=e135]:
+                  - img [ref=e136]
+                  - text: Уфа
+              - cell "30 дек. 2026 г." [ref=e139]
+              - cell "Опубликовано" [ref=e140]
+              - cell [ref=e141]:
+                - group [ref=e142]:
+                  - generic "Действия с событием" [ref=e143] [cursor=pointer]:
+                    - img [ref=e144]
+            - row "E2E 8cb4405c-17f5-4304-a8bb-839b116e8a00 Площадка E2E 8cb4405c-17f5-4304-a8bb-839b116e8a00 Уфа 30 дек. 2026 г. Опубликовано" [ref=e148]:
+              - cell "E2E 8cb4405c-17f5-4304-a8bb-839b116e8a00 Площадка E2E 8cb4405c-17f5-4304-a8bb-839b116e8a00" [ref=e149]:
+                - strong [ref=e150]: E2E 8cb4405c-17f5-4304-a8bb-839b116e8a00
+                - generic [ref=e151]: Площадка E2E 8cb4405c-17f5-4304-a8bb-839b116e8a00
+              - cell "Уфа" [ref=e152]:
+                - generic [ref=e153]:
+                  - img [ref=e154]
+                  - text: Уфа
+              - cell "30 дек. 2026 г." [ref=e157]
+              - cell "Опубликовано" [ref=e158]
+              - cell [ref=e159]:
+                - group [ref=e160]:
+                  - generic "Действия с событием" [ref=e161] [cursor=pointer]:
+                    - img [ref=e162]
+            - row "E2E f02f3303-47b9-4131-8cc1-cd6e0cca6800 Площадка E2E f02f3303-47b9-4131-8cc1-cd6e0cca6800 Уфа 30 дек. 2026 г. Опубликовано" [ref=e166]:
+              - cell "E2E f02f3303-47b9-4131-8cc1-cd6e0cca6800 Площадка E2E f02f3303-47b9-4131-8cc1-cd6e0cca6800" [ref=e167]:
+                - strong [ref=e168]: E2E f02f3303-47b9-4131-8cc1-cd6e0cca6800
+                - generic [ref=e169]: Площадка E2E f02f3303-47b9-4131-8cc1-cd6e0cca6800
+              - cell "Уфа" [ref=e170]:
+                - generic [ref=e171]:
+                  - img [ref=e172]
+                  - text: Уфа
+              - cell "30 дек. 2026 г." [ref=e175]
+              - cell "Опубликовано" [ref=e176]
+              - cell [ref=e177]:
+                - group [ref=e178]:
+                  - generic "Действия с событием" [ref=e179] [cursor=pointer]:
+                    - img [ref=e180]
+            - row "E2E Уфа — Театральная лаборатория 824 e2a618c4c0 Сцена E2E e2a618c4c0 Уфа 21 дек. 2026 г. Отменено" [ref=e184]:
+              - cell "E2E Уфа — Театральная лаборатория 824 e2a618c4c0 Сцена E2E e2a618c4c0" [ref=e185]:
+                - strong [ref=e186]: E2E Уфа — Театральная лаборатория 824 e2a618c4c0
+                - generic [ref=e187]: Сцена E2E e2a618c4c0
+              - cell "Уфа" [ref=e188]:
+                - generic [ref=e189]:
+                  - img [ref=e190]
+                  - text: Уфа
+              - cell "21 дек. 2026 г." [ref=e193]
+              - cell "Отменено" [ref=e194]
+              - cell [ref=e195]:
+                - group [ref=e196]:
+                  - generic "Действия с событием" [ref=e197] [cursor=pointer]:
+                    - img [ref=e198]
+            - row "E2E Уфа — Камерный концерт 824 e2a618c4c0 — Редакция Дом культуры E2E e2a618c4c0 Уфа 20 дек. 2026 г. Опубликовано" [ref=e202]:
+              - cell "E2E Уфа — Камерный концерт 824 e2a618c4c0 — Редакция Дом культуры E2E e2a618c4c0" [ref=e203]:
+                - strong [ref=e204]: E2E Уфа — Камерный концерт 824 e2a618c4c0 — Редакция
+                - generic [ref=e205]: Дом культуры E2E e2a618c4c0
+              - cell "Уфа" [ref=e206]:
+                - generic [ref=e207]:
+                  - img [ref=e208]
+                  - text: Уфа
+              - cell "20 дек. 2026 г." [ref=e211]
+              - cell "Опубликовано" [ref=e212]
+              - cell [ref=e213]:
+                - group [ref=e214]:
+                  - generic "Действия с событием" [ref=e215] [cursor=pointer]:
+                    - img [ref=e216]
+            - row "E2E Уфа — Научная выставка 824 e2a618c4c0 Галерея E2E e2a618c4c0 Уфа 22 дек. 2026 г. Опубликовано" [ref=e220]:
+              - cell "E2E Уфа — Научная выставка 824 e2a618c4c0 Галерея E2E e2a618c4c0" [ref=e221]:
+                - strong [ref=e222]: E2E Уфа — Научная выставка 824 e2a618c4c0
+                - generic [ref=e223]: Галерея E2E e2a618c4c0
+              - cell "Уфа" [ref=e224]:
+                - generic [ref=e225]:
+                  - img [ref=e226]
+                  - text: Уфа
+              - cell "22 дек. 2026 г." [ref=e229]
+              - cell "Опубликовано" [ref=e230]
+              - cell [ref=e231]:
+                - group [ref=e232]:
+                  - generic "Действия с событием" [ref=e233] [cursor=pointer]:
+                    - img [ref=e234]
+            - row "E2E Уфа — Театральная лаборатория 824 Сцена E2E Уфа 21 дек. 2026 г. Отменено" [ref=e238]:
+              - cell "E2E Уфа — Театральная лаборатория 824 Сцена E2E" [ref=e239]:
+                - strong [ref=e240]: E2E Уфа — Театральная лаборатория 824
+                - generic [ref=e241]: Сцена E2E
+              - cell "Уфа" [ref=e242]:
+                - generic [ref=e243]:
+                  - img [ref=e244]
+                  - text: Уфа
+              - cell "21 дек. 2026 г." [ref=e247]
+              - cell "Отменено" [ref=e248]
+              - cell [ref=e249]:
+                - group [ref=e250]:
+                  - generic "Действия с событием" [ref=e251] [cursor=pointer]:
+                    - img [ref=e252]
+            - row "E2E Уфа — Камерный концерт 824 — Редакция Дом культуры E2E Уфа 20 дек. 2026 г. Опубликовано" [ref=e256]:
+              - cell "E2E Уфа — Камерный концерт 824 — Редакция Дом культуры E2E" [ref=e257]:
+                - strong [ref=e258]: E2E Уфа — Камерный концерт 824 — Редакция
+                - generic [ref=e259]: Дом культуры E2E
+              - cell "Уфа" [ref=e260]:
+                - generic [ref=e261]:
+                  - img [ref=e262]
+                  - text: Уфа
+              - cell "20 дек. 2026 г." [ref=e265]
+              - cell "Опубликовано" [ref=e266]
+              - cell [ref=e267]:
+                - group [ref=e268]:
+                  - generic "Действия с событием" [ref=e269] [cursor=pointer]:
+                    - img [ref=e270]
+            - row "E2E Уфа — Научная выставка 824 Галерея E2E Уфа 22 дек. 2026 г. Опубликовано" [ref=e274]:
+              - cell "E2E Уфа — Научная выставка 824 Галерея E2E" [ref=e275]:
+                - strong [ref=e276]: E2E Уфа — Научная выставка 824
+                - generic [ref=e277]: Галерея E2E
+              - cell "Уфа" [ref=e278]:
+                - generic [ref=e279]:
+                  - img [ref=e280]
+                  - text: Уфа
+              - cell "22 дек. 2026 г." [ref=e283]
+              - cell "Опубликовано" [ref=e284]
+              - cell [ref=e285]:
+                - group [ref=e286]:
+                  - generic "Действия с событием" [ref=e287] [cursor=pointer]:
+                    - img [ref=e288]
+  - alert [ref=e292]
+```

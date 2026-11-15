@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 COPY --from=dependencies /opt/venv /opt/venv
 WORKDIR /app
 COPY --chown=appuser:appuser src ./src
+COPY --chown=appuser:appuser config ./config
 COPY --chown=appuser:appuser migrations ./migrations
 COPY --chown=appuser:appuser data ./data
 USER appuser

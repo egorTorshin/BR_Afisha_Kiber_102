@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import json
 import math
@@ -20,6 +21,7 @@ from src.models.schemas import (
 )
 from src.services.normalizer import (
     compute_dedup_key,
+    compute_city_conflict_key,
     compute_source_hash,
     normalize_text,
     parse_iso_datetime,
@@ -36,7 +38,7 @@ class ImportService:
     валидации, пометки спорных карточек и ведения журнала изменений (Раздел 6.1, 8 ТЗ).
     """
 
-    REQUIRED_FIELDS = ("title", "category", "date_start", "city", "venue", "address", "description", "source_url")
+    REQUIRED_FIELDS = ("title", "category", "date_start", "city", "venue")
     MAX_IMPORT_BYTES = 2 * 1024 * 1024
     MAX_IMPORT_ROWS = 2000
     FIELD_LIMITS = {"title": 250, "category": 100, "city": 120, "venue": 250,
@@ -204,7 +206,8 @@ class ImportService:
         address = str(raw_item["address"]).strip()
         description = str(raw_item["description"]).strip()
 
-        source_url = self._valid_url(str(raw_item["source_url"]).strip(), "source_url")
+        raw_source_url = str(raw_item.get("source_url") or "").strip()
+        source_url = self._valid_url(raw_source_url, "source_url") if raw_source_url else ""
 
         org_link_raw = raw_item.get("org_link")
         org_link = str(org_link_raw).strip() if org_link_raw and str(org_link_raw).strip() else None
@@ -285,6 +288,26 @@ class ImportService:
             dispute_reasons.append("Платное событие без ссылки на билеты/организатора (org_link)")
         if len(description) < 20:
             dispute_reasons.append("Слишком краткое описание мероприятия (< 20 символов)")
+        if not address:
+            dispute_reasons.append("Не указан адрес")
+        if not source_url:
+            dispute_reasons.append("Не указан источник")
+        try:
+            event_day = datetime.fromisoformat(date_start).date()
+        except ValueError:
+            event_day = datetime.min.date()
+        if event_day <= datetime.now(timezone.utc).date():
+            dispute_reasons.append("Дата мероприятия не в будущем")
+
+        # Imported/source records require an explicit successful source verification
+        # before publication. Manual administrator entry remains trusted.
+        incomplete = not address or len(description) < 20 or not source_url
+        if source_type != "ручной ввод" and status == "published" and (
+            incomplete or source_type == "страница"
+        ):
+            status = "draft"
+            if source_type == "страница" and not raw_item.get("verified_at"):
+                dispute_reasons.append("Внешнее событие требует проверки и модерации")
 
         is_disputed = len(dispute_reasons) > 0
         dispute_reason = "; ".join(dict.fromkeys(dispute_reasons)) if is_disputed else None
@@ -390,9 +413,14 @@ class ImportService:
         matches = self.db.fetchall(
             """SELECT * FROM events WHERE id = ? OR
                (merged_into IS NULL AND (dedup_key = ? OR id IN
-                (SELECT event_id FROM event_sources WHERE source_hash = ? AND source_url = ?)))
+                (SELECT es.event_id FROM event_sources es JOIN events se ON se.id = es.event_id
+                 WHERE ? <> 'ручной ввод' AND es.source_url = ?
+                   AND se.normalized_title = ? AND se.search_venue = ?) OR
+                (normalized_title = ? AND date_start = ? AND search_venue = ?)))
                ORDER BY created_at, id""",
-            (norm["id"], norm["dedup_key"], norm["source_hash"], norm["source_url"]),
+            (norm["id"], norm["dedup_key"], norm["source_type"], norm["source_url"], norm["normalized_title"],
+             normalize_text(norm["venue"]),
+             norm["normalized_title"], norm["date_start"], normalize_text(norm["venue"])),
         )
         targets = {}
         for match in matches:
@@ -400,6 +428,19 @@ class ImportService:
                 match = self.db.fetchone("SELECT * FROM events WHERE id = ?", (match["merged_into"],))
             targets[match["id"]] = match
         existing = next(iter(targets.values()), None)
+        city_conflict = bool(existing and normalize_text(existing["city"]) != normalize_text(norm["city"]))
+        if city_conflict:
+            # The unique index is retained. Keep distinct-city records separate and
+            # send both identities to moderation rather than merging them.
+            norm["dedup_key"] = compute_city_conflict_key(
+                norm["title"], norm["date_start"], norm["city"], norm["venue"])
+            norm["is_disputed"] = True
+            norm["dispute_reason"] = "; ".join(filter(None, [norm.get("dispute_reason"),
+                f"Совпадает название/дата/площадка с событием в городе {existing['city']}"]))
+            self.db.execute("UPDATE events SET is_disputed = 1, dispute_reason = ?, updated_at = ? WHERE id = ?",
+                (f"Совпадает название/дата/площадка с событием в городе {norm['city']}",
+                 datetime.now(timezone.utc).isoformat(), existing["id"]))
+            existing = None
         if existing:
             for other_id in list(targets)[1:]:
                 self.merge_events(existing["id"], other_id, actor)
@@ -411,6 +452,10 @@ class ImportService:
                 norm["is_disputed"] = bool(existing["is_disputed"])
                 norm["dispute_reason"] = existing["dispute_reason"]
             source_changed = self.save_source(existing["id"], norm, actor)
+            # Manual administrator entry is a trusted catalog source. Keep that
+            # provenance when later collector imports add corroborating sources.
+            if existing["source_type"] == "ручной ввод":
+                norm["source_type"] = "ручной ввод"
             # The legacy fields consistently refer to the primary source.
             if norm["source_url"] != existing["source_url"]:
                 for field in ("source_url", "source_type", "source_hash", "verified_at"):
@@ -490,6 +535,13 @@ class ImportService:
 
         # Проверяем, изменились ли содержательные поля (идемпотентность при повторном импорте того же файла)
         values = {k: v for k, v in norm.items() if not k.startswith("_") and k != "id"}
+        if (existing["status"] == "published" and existing["source_type"] != "ручной ввод"
+                and any(existing.get(key) != value for key, value in values.items()
+                        if key not in {"tags", "verified_at", "source_hash", "source_url", "source_type"})):
+            values["status"] = "draft"
+            values["is_disputed"] = 1
+            values["dispute_reason"] = "; ".join(filter(None, [norm.get("dispute_reason"),
+                "Изменение внешнего события требует повторной модерации"]))
         values["tags"] = tags_json
         values.update(search_fields)
         for flag in ("is_free", "is_disputed"):
@@ -563,6 +615,14 @@ class ImportService:
                     })
             except Exception as exc:
                 rejected += 1
+                # Rejected source rows remain available for repair and audit.
+                if isinstance(raw_item, dict) and isinstance(exc, ValueError):
+                    # Rejected records can share event identity while differing in
+                    # invalid fields. Hash the whole payload so each raw variant survives.
+                    raw_hash = hashlib.sha256(
+                        json.dumps(raw_item, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+                    ).hexdigest()
+                    self._save_raw_event(raw_item, source_type, source_file, raw_hash)
                 rejected_reasons.append({
                     "row": idx,
                     "title": str(raw_item.get("title", "<без названия>")) if isinstance(raw_item, dict) else "<без названия>",
@@ -631,7 +691,10 @@ class ImportService:
         if file_path.stat().st_size > self.max_import_bytes:
             raise ValueError("Файл импорта слишком большой")
         suffix = file_path.suffix.lower()
-        content = file_path.read_text(encoding="utf-8-sig")
+        try:
+            content = file_path.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            raise ValueError("Некорректная кодировка файла импорта. Используйте UTF-8.") from None
         return self.import_from_content(content, filename=file_path.name, suffix=suffix, actor=actor)
 
     def import_from_content(
@@ -744,7 +807,7 @@ class ImportService:
     def update_event_fields(self, event_id: str, changes: Dict[str, Any], actor: str,
                             _propagate: bool = True) -> EventRecord:
         """Validate editable fields and persist them with the standard audit trail."""
-        editable = set(self.REQUIRED_FIELDS) | {"date_end", "duration_min", "price_min", "price_max", "is_free",
+        editable = set(self.REQUIRED_FIELDS) | {"address", "description", "source_url", "date_end", "duration_min", "price_min", "price_max", "is_free",
                     "age_limit", "language", "org_link", "tags", "lat", "lon"}
         unsupported = set(changes) - editable
         if unsupported:
@@ -800,6 +863,17 @@ class ImportService:
         while existing.get("merged_into"):
             existing = self.db.fetchone("SELECT * FROM events WHERE id = ?", (existing["merged_into"],))
         event_id = existing["id"]
+        if new_status == "published" and existing["source_type"] != "ручной ввод":
+            try:
+                parsed_day = datetime.fromisoformat(existing["date_start"]).date()
+                self._valid_url(existing["source_url"], "source_url")
+            except (TypeError, ValueError):
+                raise ValueError("Нельзя опубликовать событие с некорректной датой или source_url") from None
+            if parsed_day <= datetime.now(timezone.utc).date() or any(
+                not str(existing.get(field) or "").strip()
+                for field in ("title", "category", "city", "venue", "address", "description")
+            ):
+                raise ValueError("Для публикации заполните обязательные поля и укажите будущую дату")
         old_status = existing["status"]
         now_iso = datetime.now(timezone.utc).isoformat()
         self.db.execute(

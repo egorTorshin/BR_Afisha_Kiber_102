@@ -48,6 +48,34 @@ def test_web_speech_endpoint_rejects_21_seconds_and_reports_unavailable_stt(db):
         assert unavailable.status_code == 503
 
 
+def test_service_errors_keep_http_status_request_id_and_hide_exception_text(client, monkeypatch):
+    from src.http.public import RecommendationService
+
+    def fail(*args, **kwargs):
+        raise LookupError("private database secret")
+
+    monkeypatch.setattr(RecommendationService, "build_weekend_plan", fail)
+    response = client.post("/api/v1/weekend-plan", json={})
+    assert response.status_code == 404
+    assert "private database secret" not in response.text
+    assert response.json()["request_id"] == response.headers["x-request-id"]
+
+
+def test_speech_errors_keep_status_request_id_and_hide_provider_details(db, monkeypatch):
+    import src.http.agent as agent_http
+    from src.services.speech_service import SpeechUnavailable
+
+    async def fail(*args, **kwargs):
+        raise SpeechUnavailable("provider secret token=abc123")
+
+    monkeypatch.setattr(agent_http, "transcribe_audio", fail)
+    with TestClient(create_app(db, Settings(groq_api_key="configured")), raise_server_exceptions=False) as client:
+        response = client.post("/api/v1/speech/transcribe", content=_wav(1), headers={"Content-Type": "audio/wav"})
+    assert response.status_code == 503
+    assert "provider secret" not in response.text and "abc123" not in response.text
+    assert response.json()["request_id"] == response.headers["x-request-id"]
+
+
 def test_routes_and_visibility(client, catalog):
     assert client.get('/health').json() == {'status': 'ok'}
     for path in ('/events', '/api/v1/events'):

@@ -113,6 +113,12 @@ class SqlAgentTraceRepository:
         self.db.execute("INSERT INTO agent_traces (request_id, conversation_id, trace_json, created_at) VALUES (?, ?, ?, ?)",
                         (trace.trace_id, conversation_id, trace.model_dump_json(), utc_now().isoformat()))
 
+    def update(self, conversation_id, trace):
+        self.db.execute(
+            "UPDATE agent_traces SET conversation_id = ?, trace_json = ? WHERE request_id = ?",
+            (conversation_id, trace.model_dump_json(), trace.trace_id),
+        )
+
 
 class AgentSessionRepository:
     """Server-side anonymous browser sessions; raw bearer tokens never reach the database."""
