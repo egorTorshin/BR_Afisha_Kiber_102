@@ -1,0 +1,1714 @@
+{
+  "purpose": "Exploratory simple-search latency",
+  "independent_sla": false,
+  "reason": "Main benchmark last trace: 2026-11-15T03:17:23.076805+00:00; this run started 2026-11-15T03:17:36+00:00. Twelve selected searches are not the full section 9 SLA sample.",
+  "started_at_utc": "2026-11-15T03:17:36+00:00",
+  "code_commit": "75a6e5071f5ef0408f81a99f6cc9848fe8ff1e0f",
+  "dataset_sha256": "722c44ce5518f9069021bc7c847d26a7dd368e34b63e7f12e8a5899e6c375c2b",
+  "snapshot_sha256": "c997df38e3e4c4f091d3a539f3f1cb5177917323df7c24650a2c786ab3535efa",
+  "model_attempt_cases": 12,
+  "model_transport_success_cases": 12,
+  "model_transport_failure_cases": 0,
+  "model_valid_result_cases": 10,
+  "model_invalid_result_cases": 2,
+  "total_cases": 12,
+  "llm_calls": 12,
+  "full_response_transport_p50_seconds": 5.69245,
+  "full_response_transport_p95_seconds": 7.923683,
+  "full_response_valid_p50_seconds": 5.859521,
+  "full_response_valid_p95_seconds": 7.923683,
+  "full_response_all_p50_seconds": 5.69245,
+  "full_response_all_p95_seconds": 7.923683,
+  "elapsed_seconds": 67.995,
+  "cases": [
+    {
+      "id": "S01",
+      "query": "Покажи концерты в Уфе 15 ноября",
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: город Уфа, категория концерт, период с 2026-11-15, период до 2026-11-15.",
+      "returned_event_ids": [
+        "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+        "11111111-1111-4111-8111-000000000009"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-25de4b21d88844e68d91585b430bdf0c",
+        "request_id": "simple-latency-25de4b21d88844e68d91585b430bdf0c",
+        "conversation_id": "simple-latency-25de4b21d88844e68d91585b430bdf0c",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 31,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-15",
+              "date_to": "2026-11-15",
+              "city": "Уфа",
+              "category": "концерт",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+          "11111111-1111-4111-8111-000000000009"
+        ],
+        "latency_ms": 2750,
+        "input_tokens": 209,
+        "output_tokens": 68,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 209,
+            "output_tokens": 68
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+            "11111111-1111-4111-8111-000000000009"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+          "11111111-1111-4111-8111-000000000009"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-25de4b21d88844e68d91585b430bdf0c",
+            "session_id": "simple-latency-25de4b21d88844e68d91585b430bdf0c",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:17:37.235624+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 209,
+            "completion_tokens": 68,
+            "completion_length": 154,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 2713,
+            "prefill_ms": 70.832,
+            "decode_ms": 2630.696,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 2713,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 0,
+          "smart_interpretation": 2724,
+          "response_formatting": 13,
+          "tool_execution": 7,
+          "jev_inference": 0,
+          "qwen_inference": 2713,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": null,
+      "full_latency_seconds": 2.77815
+    },
+    {
+      "id": "S02",
+      "query": "Найди выставки в Уфе 14 ноября",
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: город Уфа, категория выставка, период с 2026-11-14, период до 2026-11-14.",
+      "returned_event_ids": [
+        "11111111-1111-4111-8111-000000000005",
+        "11826d65-f75c-5c9d-81f3-b1493ad810f6"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-d4c3a40104d446afb4b62da802f58ce2",
+        "request_id": "simple-latency-d4c3a40104d446afb4b62da802f58ce2",
+        "conversation_id": "simple-latency-d4c3a40104d446afb4b62da802f58ce2",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 30,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-14",
+              "date_to": "2026-11-14",
+              "city": "Уфа",
+              "category": "выставка",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "11111111-1111-4111-8111-000000000005",
+          "11826d65-f75c-5c9d-81f3-b1493ad810f6"
+        ],
+        "latency_ms": 5988,
+        "input_tokens": 207,
+        "output_tokens": 71,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 207,
+            "output_tokens": 71
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "11111111-1111-4111-8111-000000000005",
+            "11826d65-f75c-5c9d-81f3-b1493ad810f6"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "11111111-1111-4111-8111-000000000005",
+          "11826d65-f75c-5c9d-81f3-b1493ad810f6"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-d4c3a40104d446afb4b62da802f58ce2",
+            "session_id": "simple-latency-d4c3a40104d446afb4b62da802f58ce2",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:17:39.995585+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 207,
+            "completion_tokens": 71,
+            "completion_length": 175,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 5949,
+            "prefill_ms": 681.155,
+            "decode_ms": 5261.653,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 5949,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 0,
+          "smart_interpretation": 5963,
+          "response_formatting": 15,
+          "tool_execution": 5,
+          "jev_inference": 0,
+          "qwen_inference": 5949,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": null,
+      "full_latency_seconds": 5.997387
+    },
+    {
+      "id": "S03",
+      "query": "Какие спектакли в Стерлитамаке 14 ноября?",
+      "status": "clarification",
+      "message": "Уточните город, дату, категорию или другое условие поиска.",
+      "returned_event_ids": [],
+      "trace": {
+        "trace_id": "simple-latency-219a21d18cfa496091fd2eeeb0ee976b",
+        "request_id": "simple-latency-219a21d18cfa496091fd2eeeb0ee976b",
+        "conversation_id": "simple-latency-219a21d18cfa496091fd2eeeb0ee976b",
+        "user_query": null,
+        "plan_summary": "fallback intent=search_events; tools=none",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 41,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [],
+        "result_ids": [],
+        "latency_ms": 5126,
+        "input_tokens": 211,
+        "output_tokens": 60,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 211,
+            "output_tokens": 60
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [],
+        "stop_reason": "clarification",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": "invalid_json",
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-219a21d18cfa496091fd2eeeb0ee976b",
+            "session_id": "simple-latency-219a21d18cfa496091fd2eeeb0ee976b",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:17:45.996422+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 211,
+            "completion_tokens": 60,
+            "completion_length": 143,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "failure",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 5094,
+            "prefill_ms": 810.472,
+            "decode_ms": 4273.844,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 5094,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 5102,
+          "response_formatting": 17,
+          "tool_execution": 0,
+          "jev_inference": 0,
+          "qwen_inference": 5094,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": "invalid_json",
+      "full_latency_seconds": 5.138026
+    },
+    {
+      "id": "S04",
+      "query": "Хочу на концерт в Стерлитамаке 14 ноября",
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: город Стерлитамак, категория концерт, период с 2026-11-14, период до 2026-11-14.",
+      "returned_event_ids": [
+        "11111111-1111-4111-8111-000000000004"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-b25acfb488d24982ab772e9a69b21f04",
+        "request_id": "simple-latency-b25acfb488d24982ab772e9a69b21f04",
+        "conversation_id": "simple-latency-b25acfb488d24982ab772e9a69b21f04",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 40,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-14",
+              "date_to": "2026-11-14",
+              "city": "Стерлитамак",
+              "category": "концерт",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "11111111-1111-4111-8111-000000000004"
+        ],
+        "latency_ms": 7378,
+        "input_tokens": 212,
+        "output_tokens": 85,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 212,
+            "output_tokens": 85
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "11111111-1111-4111-8111-000000000004"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "11111111-1111-4111-8111-000000000004"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-b25acfb488d24982ab772e9a69b21f04",
+            "session_id": "simple-latency-b25acfb488d24982ab772e9a69b21f04",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:17:51.135595+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 212,
+            "completion_tokens": 85,
+            "completion_length": 204,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 7334,
+            "prefill_ms": 931.74,
+            "decode_ms": 6392.796,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 7334,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 7352,
+          "response_formatting": 14,
+          "tool_execution": 5,
+          "jev_inference": 0,
+          "qwen_inference": 7334,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": null,
+      "full_latency_seconds": 7.389656
+    },
+    {
+      "id": "S05",
+      "query": "Покажи экскурсии в Уфе 14 ноября",
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: город Уфа, категория экскурсия, период с 2026-11-14, период до 2026-11-14.",
+      "returned_event_ids": [
+        "11111111-1111-4111-8111-000000000012"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-4e605ae1881f4b5d9a9ec2556b8d22c8",
+        "request_id": "simple-latency-4e605ae1881f4b5d9a9ec2556b8d22c8",
+        "conversation_id": "simple-latency-4e605ae1881f4b5d9a9ec2556b8d22c8",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 32,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-14",
+              "date_to": "2026-11-14",
+              "city": "Уфа",
+              "category": "экскурсия",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "11111111-1111-4111-8111-000000000012"
+        ],
+        "latency_ms": 5920,
+        "input_tokens": 209,
+        "output_tokens": 72,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 209,
+            "output_tokens": 72
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "11111111-1111-4111-8111-000000000012"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "11111111-1111-4111-8111-000000000012"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-4e605ae1881f4b5d9a9ec2556b8d22c8",
+            "session_id": "simple-latency-4e605ae1881f4b5d9a9ec2556b8d22c8",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:17:58.525213+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 209,
+            "completion_tokens": 72,
+            "completion_length": 177,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 5879,
+            "prefill_ms": 842.29,
+            "decode_ms": 5029.449,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 5879,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 5895,
+          "response_formatting": 15,
+          "tool_execution": 4,
+          "jev_inference": 0,
+          "qwen_inference": 5879,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": null,
+      "full_latency_seconds": 5.932093
+    },
+    {
+      "id": "S06",
+      "query": "Есть кино в Уфе 14 ноября?",
+      "status": "clarification",
+      "message": "Уточните город, дату, категорию или другое условие поиска.",
+      "returned_event_ids": [],
+      "trace": {
+        "trace_id": "simple-latency-9be56caf8826487fbf4eacfe0bdb996b",
+        "request_id": "simple-latency-9be56caf8826487fbf4eacfe0bdb996b",
+        "conversation_id": "simple-latency-9be56caf8826487fbf4eacfe0bdb996b",
+        "user_query": null,
+        "plan_summary": "fallback intent=search_events; tools=none",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 26,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [],
+        "result_ids": [],
+        "latency_ms": 4652,
+        "input_tokens": 204,
+        "output_tokens": 56,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 204,
+            "output_tokens": 56
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [],
+        "stop_reason": "clarification",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": "invalid_json",
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-9be56caf8826487fbf4eacfe0bdb996b",
+            "session_id": "simple-latency-9be56caf8826487fbf4eacfe0bdb996b",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:18:04.474934+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 204,
+            "completion_tokens": 56,
+            "completion_length": 142,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "failure",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 4605,
+            "prefill_ms": 744.592,
+            "decode_ms": 3830.695,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 4605,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 4634,
+          "response_formatting": 12,
+          "tool_execution": 0,
+          "jev_inference": 0,
+          "qwen_inference": 4605,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": "invalid_json",
+      "full_latency_seconds": 4.664909
+    },
+    {
+      "id": "S07",
+      "query": "Найди фестиваль в Уфе 15 ноября",
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: город Уфа, категория фестиваль, период с 2026-11-15, период до 2026-11-15.",
+      "returned_event_ids": [
+        "11111111-1111-4111-8111-000000000010"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-6b62c388f0754f4c918627aedda57b88",
+        "request_id": "simple-latency-6b62c388f0754f4c918627aedda57b88",
+        "conversation_id": "simple-latency-6b62c388f0754f4c918627aedda57b88",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 31,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-15",
+              "date_to": "2026-11-15",
+              "city": "Уфа",
+              "category": "фестиваль",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "11111111-1111-4111-8111-000000000010"
+        ],
+        "latency_ms": 5775,
+        "input_tokens": 208,
+        "output_tokens": 66,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 208,
+            "output_tokens": 66
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "11111111-1111-4111-8111-000000000010"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "11111111-1111-4111-8111-000000000010"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-6b62c388f0754f4c918627aedda57b88",
+            "session_id": "simple-latency-6b62c388f0754f4c918627aedda57b88",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:18:09.121304+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 208,
+            "completion_tokens": 66,
+            "completion_length": 155,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 5734,
+            "prefill_ms": 798.285,
+            "decode_ms": 4927.701,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 5734,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 5749,
+          "response_formatting": 14,
+          "tool_execution": 6,
+          "jev_inference": 0,
+          "qwen_inference": 5734,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": null,
+      "full_latency_seconds": 5.786949
+    },
+    {
+      "id": "S08",
+      "query": "Покажи спектакли в Уфе 19 ноября",
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: город Уфа, категория спектакль, период с 2026-11-19, период до 2026-11-19.",
+      "returned_event_ids": [
+        "11111111-1111-4111-8111-000000000013"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-4d6b9ad94c794060b6ca246fa92190ca",
+        "request_id": "simple-latency-4d6b9ad94c794060b6ca246fa92190ca",
+        "conversation_id": "simple-latency-4d6b9ad94c794060b6ca246fa92190ca",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 32,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-19",
+              "date_to": "2026-11-19",
+              "city": "Уфа",
+              "category": "спектакль",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "11111111-1111-4111-8111-000000000013"
+        ],
+        "latency_ms": 5586,
+        "input_tokens": 209,
+        "output_tokens": 65,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 209,
+            "output_tokens": 65
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "11111111-1111-4111-8111-000000000013"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "11111111-1111-4111-8111-000000000013"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-4d6b9ad94c794060b6ca246fa92190ca",
+            "session_id": "simple-latency-4d6b9ad94c794060b6ca246fa92190ca",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:18:14.909838+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 209,
+            "completion_tokens": 65,
+            "completion_length": 155,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 5542,
+            "prefill_ms": 779.808,
+            "decode_ms": 4755.417,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 5542,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 5560,
+          "response_formatting": 15,
+          "tool_execution": 5,
+          "jev_inference": 0,
+          "qwen_inference": 5542,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": null,
+      "full_latency_seconds": 5.597951
+    },
+    {
+      "id": "S09",
+      "query": "Какие концерты в Нефтекамске 14 ноября?",
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: город Нефтекамск, категория концерт, период с 2026-11-14, период до 2026-11-14.",
+      "returned_event_ids": [
+        "11111111-1111-4111-8111-000000000018"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-8e9ad17585464faaa105ce9bfca5604f",
+        "request_id": "simple-latency-8e9ad17585464faaa105ce9bfca5604f",
+        "conversation_id": "simple-latency-8e9ad17585464faaa105ce9bfca5604f",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 39,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-14",
+              "date_to": "2026-11-14",
+              "city": "Нефтекамск",
+              "category": "концерт",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "11111111-1111-4111-8111-000000000018"
+        ],
+        "latency_ms": 4698,
+        "input_tokens": 210,
+        "output_tokens": 56,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 210,
+            "output_tokens": 56
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "11111111-1111-4111-8111-000000000018"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "11111111-1111-4111-8111-000000000018"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-8e9ad17585464faaa105ce9bfca5604f",
+            "session_id": "simple-latency-8e9ad17585464faaa105ce9bfca5604f",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:18:20.505423+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 210,
+            "completion_tokens": 56,
+            "completion_length": 132,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 4659,
+            "prefill_ms": 828.961,
+            "decode_ms": 3822.384,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 4659,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 4674,
+          "response_formatting": 14,
+          "tool_execution": 5,
+          "jev_inference": 0,
+          "qwen_inference": 4659,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": null,
+      "full_latency_seconds": 4.709389
+    },
+    {
+      "id": "S10",
+      "query": "Найди выставки в Салавате 16 ноября",
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: город Салават, категория выставка, период с 2026-11-16, период до 2026-11-16.",
+      "returned_event_ids": [
+        "11111111-1111-4111-8111-000000000017"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-4cc287414213419bb299c00ec38d6896",
+        "request_id": "simple-latency-4cc287414213419bb299c00ec38d6896",
+        "conversation_id": "simple-latency-4cc287414213419bb299c00ec38d6896",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 35,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-16",
+              "date_to": "2026-11-16",
+              "city": "Салават",
+              "category": "выставка",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "11111111-1111-4111-8111-000000000017"
+        ],
+        "latency_ms": 7911,
+        "input_tokens": 210,
+        "output_tokens": 64,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 210,
+            "output_tokens": 64
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "11111111-1111-4111-8111-000000000017"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "11111111-1111-4111-8111-000000000017"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-4cc287414213419bb299c00ec38d6896",
+            "session_id": "simple-latency-4cc287414213419bb299c00ec38d6896",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:18:25.214117+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 210,
+            "completion_tokens": 64,
+            "completion_length": 158,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 7876,
+            "prefill_ms": 819.162,
+            "decode_ms": 7049.56,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 7876,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 7890,
+          "response_formatting": 11,
+          "tool_execution": 4,
+          "jev_inference": 0,
+          "qwen_inference": 7876,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": null,
+      "full_latency_seconds": 7.923683
+    },
+    {
+      "id": "S11",
+      "query": "Что из спектаклей есть в Салавате 18 ноября?",
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: город Салават, период с 2026-11-18, период до 2026-11-18.",
+      "returned_event_ids": [
+        "11111111-1111-4111-8111-000000000017",
+        "645ddb0f-5382-5ca8-aef4-6c41dc7faa54",
+        "11111111-1111-4111-8111-000000000016"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-a4a5165120de47059b09c0a56e9d83cd",
+        "request_id": "simple-latency-a4a5165120de47059b09c0a56e9d83cd",
+        "conversation_id": "simple-latency-a4a5165120de47059b09c0a56e9d83cd",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 44,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-18",
+              "date_to": "2026-11-18",
+              "city": "Салават",
+              "category": null,
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "11111111-1111-4111-8111-000000000017",
+          "645ddb0f-5382-5ca8-aef4-6c41dc7faa54",
+          "11111111-1111-4111-8111-000000000016"
+        ],
+        "latency_ms": 4042,
+        "input_tokens": 212,
+        "output_tokens": 30,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 212,
+            "output_tokens": 30
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "11111111-1111-4111-8111-000000000017",
+            "645ddb0f-5382-5ca8-aef4-6c41dc7faa54",
+            "11111111-1111-4111-8111-000000000016"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "11111111-1111-4111-8111-000000000017",
+          "645ddb0f-5382-5ca8-aef4-6c41dc7faa54",
+          "11111111-1111-4111-8111-000000000016"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-a4a5165120de47059b09c0a56e9d83cd",
+            "session_id": "simple-latency-a4a5165120de47059b09c0a56e9d83cd",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:18:33.140739+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 212,
+            "completion_tokens": 30,
+            "completion_length": 83,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 3999,
+            "prefill_ms": 887.569,
+            "decode_ms": 3102.79,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 3999,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 4015,
+          "response_formatting": 16,
+          "tool_execution": 4,
+          "jev_inference": 0,
+          "qwen_inference": 3999,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": null,
+      "full_latency_seconds": 4.054237
+    },
+    {
+      "id": "S12",
+      "query": "Покажи экскурсии в Стерлитамаке 14 ноября",
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: город Стерлитамак, категория экскурсия, период с 2026-11-14, период до 2026-11-14.",
+      "returned_event_ids": [
+        "11111111-1111-4111-8111-000000000015"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-14adcd5fcfc24c23bbc226eca0ea4422",
+        "request_id": "simple-latency-14adcd5fcfc24c23bbc226eca0ea4422",
+        "conversation_id": "simple-latency-14adcd5fcfc24c23bbc226eca0ea4422",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 41,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-14",
+              "date_to": "2026-11-14",
+              "city": "Стерлитамак",
+              "category": "экскурсия",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "11111111-1111-4111-8111-000000000015"
+        ],
+        "latency_ms": 7776,
+        "input_tokens": 213,
+        "output_tokens": 74,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 213,
+            "output_tokens": 74
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "11111111-1111-4111-8111-000000000015"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "11111111-1111-4111-8111-000000000015"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-14adcd5fcfc24c23bbc226eca0ea4422",
+            "session_id": "simple-latency-14adcd5fcfc24c23bbc226eca0ea4422",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T03:18:37.195299+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 213,
+            "completion_tokens": 74,
+            "completion_length": 184,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 7732,
+            "prefill_ms": 978.107,
+            "decode_ms": 6746.87,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 7732,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 7748,
+          "response_formatting": 15,
+          "tool_execution": 5,
+          "jev_inference": 0,
+          "qwen_inference": 7732,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": null,
+      "full_latency_seconds": 7.788051
+    }
+  ],
+  "concurrent_full_benchmark": false
+}

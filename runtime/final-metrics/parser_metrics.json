@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "metrics": {
+    "catalog_completeness": {
+      "value": 100.0,
+      "status": "PASS",
+      "threshold": ">=95%",
+      "reason": "120/120 rows have all required fields"
+    },
+    "duplicate_rate": {
+      "value": 0.0,
+      "status": "PASS",
+      "threshold": "<=2% (уровень 1–2); <=5% (уровень 4)",
+      "reason": "0/120 repeated dedup_key values"
+    },
+    "search_recall": {
+      "value": null,
+      "status": "UNVERIFIED",
+      "threshold": ">=90%",
+      "reason": "Нет разметки relevant_event_ids"
+    },
+    "false_empty_rate": {
+      "value": null,
+      "status": "UNVERIFIED",
+      "threshold": "<=5%",
+      "reason": "Нужна gold-разметка запросов с ожидаемым результатом"
+    },
+    "search_only_p95_seconds": {
+      "value": null,
+      "status": "UNVERIFIED",
+      "threshold": "<=1.5",
+      "reason": "Замер выполняется runner-ом на snapshot"
+    },
+    "import_100_first_pass": {
+      "value": null,
+      "status": "UNVERIFIED",
+      "threshold": "100 событий без ручной правки и отказов",
+      "reason": "Требуется live-прогон или gold-разметка"
+    },
+    "import_100_repeat": {
+      "value": null,
+      "status": "UNVERIFIED",
+      "threshold": "0 добавлений, 100 unchanged, 0 отказов",
+      "reason": "Требуется live-прогон или gold-разметка"
+    },
+    "collection_extraction_accuracy_50": {
+      "value": null,
+      "status": "UNVERIFIED",
+      "threshold": ">=90%",
+      "reason": "Ожидаются 50 ручных сверок"
+    },
+    "imported_duplicate_rate": {
+      "value": null,
+      "status": "UNVERIFIED",
+      "threshold": "<=5%",
+      "reason": "Требуется измеренный импортный batch из 100 записей"
+    },
+    "cancelled_events_shown_as_active": {
+      "value": null,
+      "status": "UNVERIFIED",
+      "threshold": "0",
+      "reason": "Требуется отдельный runtime case с отменённой карточкой"
+    }
+  },
+  "snapshot_sha256": "d64d602de2d042c32ec3ee63fdfe61d91238c3178891b150e4fb0182cb4d473e"
+}

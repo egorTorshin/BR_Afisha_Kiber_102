@@ -1,0 +1,1265 @@
+{
+  "purpose": "Exploratory simple-search latency",
+  "independent_sla": false,
+  "holdout_provenance": "Separate phrasing family generated from the same seed catalog; no manual external authorship.",
+  "concurrent_full_benchmark": false,
+  "reason": "Simple search scope; factual claims and other agent metrics need separate gold review.",
+  "started_at_utc": "2026-11-15T04:36:32+00:00",
+  "code_commit": "75a6e5071f5ef0408f81a99f6cc9848fe8ff1e0f",
+  "model_config": {
+    "jev": "qwen2.5-1.5b-router",
+    "light": "qwen2.5-3b-local",
+    "heavy": "qwen2.5-3b-local",
+    "temperature": 0,
+    "light_max_tokens": 384,
+    "heavy_max_tokens": 512,
+    "light_timeout_seconds": 7.0,
+    "heavy_timeout_seconds": 7.0,
+    "jev_prompt_version": "v1"
+  },
+  "dataset_sha256": {
+    "exploratory": "ac7b33f7553673266a906ccc40f80f42470bf6c4935ea5b9fc1b06020368e0b4"
+  },
+  "snapshot_sha256": "5522bb5cb4cc69a31400efe66e2a5c0bf88dd1076941f1001af98b965dc63e0c",
+  "model_attempt_cases": 8,
+  "model_transport_success_cases": 8,
+  "model_transport_failure_cases": 0,
+  "model_valid_result_cases": 2,
+  "model_invalid_result_cases": 6,
+  "total_cases": 8,
+  "llm_calls": 12,
+  "full_response_transport_p50_seconds": 3.6408715000000003,
+  "full_response_transport_p95_seconds": 13.008447,
+  "full_response_valid_p50_seconds": 5.9193765,
+  "full_response_valid_p95_seconds": 6.345742,
+  "full_response_all_p50_seconds": 3.6408715000000003,
+  "full_response_all_p95_seconds": 13.008447,
+  "elapsed_seconds": 38.91,
+  "cases": [
+    {
+      "set": "exploratory",
+      "id": "ambiguous-original",
+      "query": "Хочу куда-нибудь сходить",
+      "expected_args": null,
+      "source_seed_event_id": null,
+      "status": "clarification",
+      "message": "Уточните, пожалуйста, город, дату или интересующий вид мероприятия.",
+      "returned_event_ids": [],
+      "trace": {
+        "trace_id": "simple-latency-5791ddb2f5434282baece0836fb17ff3",
+        "request_id": "simple-latency-5791ddb2f5434282baece0836fb17ff3",
+        "conversation_id": "simple-latency-5791ddb2f5434282baece0836fb17ff3",
+        "user_query": null,
+        "plan_summary": "fallback intent=other; tools=search_events",
+        "routing_features": {
+          "intent": "other",
+          "constraint_count": 0,
+          "message_length": 24,
+          "dialogue_turns": 0,
+          "requires_tools": false,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": false,
+          "requires_dialogue_context": false,
+          "requires_clarification": true,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "HEAVY",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "max_duration_min": 120,
+              "limit": 10,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [],
+        "latency_ms": 12975,
+        "input_tokens": 1628,
+        "output_tokens": 53,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 1628,
+            "output_tokens": 53
+          },
+          {
+            "model_name": "qwen2.5-1.5b-router",
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": {
+          "router_payload": {
+            "intent": "other",
+            "constraint_count": 0,
+            "message_length": 24,
+            "dialogue_turns": 0,
+            "requires_tools": false,
+            "requires_multi_step": false,
+            "requires_comparison": false,
+            "requires_temporal_reasoning": false,
+            "requires_geo_reasoning": false,
+            "requires_dialogue_context": false,
+            "requires_clarification": true,
+            "dialogue_depth": 0,
+            "has_previous_results": false,
+            "possible_prompt_injection": false,
+            "possible_jailbreak": false,
+            "possible_prompt_leak_attempt": false,
+            "possible_sql_injection": false
+          },
+          "route": "HEAVY",
+          "jev_route": "HEAVY",
+          "confidence": 1.0,
+          "reason_code": "complex_dialogue",
+          "latency_ms": 2312,
+          "router_error": null,
+          "fallback": false,
+          "cache_status": "disabled"
+        },
+        "adaptive_route": "DEEP",
+        "execution_path": "DEEP",
+        "route_reason": "unsupported_intent_legacy",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          [
+            "86f6ad4a-c80a-51cd-b78a-6eb3cd6f2002",
+            "bba1cd25-7844-50e3-aecc-77ab5f47f139",
+            "c56266e5-8205-56c5-9b24-76f3baca441b",
+            "11111111-1111-4111-8111-000000000002",
+            "11111111-1111-4111-8111-000000000005",
+            "11111111-1111-4111-8111-000000000007",
+            "11111111-1111-4111-8111-000000000003",
+            "0d96b416-3964-5b6d-95f7-af3f88db7d25",
+            "1ac4056b-bb9e-531e-9150-ff1513163101",
+            "4d7184ad-dbbd-520d-b565-e28b9b4decff"
+          ]
+        ],
+        "number_of_steps": 1,
+        "repair_attempts": 0,
+        "max_context_tokens": 2962,
+        "basis_event_ids": [],
+        "stop_reason": "clarification",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": "model_error",
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-5791ddb2f5434282baece0836fb17ff3",
+            "session_id": "simple-latency-5791ddb2f5434282baece0836fb17ff3",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:36:32.931038+00:00",
+            "route": "ROUTER",
+            "model_alias": "qwen2.5-1.5b-router",
+            "schema_validation": "success",
+            "inference_latency_ms": 2310,
+            "http_status": 200,
+            "structured_validation_latency_ms": 1,
+            "latency_ms": 2312
+          },
+          {
+            "request_id": "simple-latency-5791ddb2f5434282baece0836fb17ff3",
+            "session_id": "simple-latency-5791ddb2f5434282baece0836fb17ff3",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:36:35.262930+00:00",
+            "route": "HEAVY",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 1628,
+            "completion_tokens": 53,
+            "completion_length": 78,
+            "finish_reason": "tool_calls",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "not_applicable",
+            "tool_name_validation": "success",
+            "tool_argument_validation": "success",
+            "error_category": null,
+            "inference_latency_ms": 3594,
+            "prefill_ms": 732.744,
+            "decode_ms": 2788.769,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 3594
+          },
+          {
+            "request_id": "simple-latency-5791ddb2f5434282baece0836fb17ff3",
+            "session_id": "simple-latency-5791ddb2f5434282baece0836fb17ff3",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:36:38.878817+00:00",
+            "route": "HEAVY",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "completion_length": 0,
+            "finish_reason": null,
+            "http_status": null,
+            "json_parse": "not_checked",
+            "schema_validation": "not_checked",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": "timeout",
+            "latency_ms": 7003
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 0,
+          "routing": 2312,
+          "qwen_heavy": 10642,
+          "response_formatting": 12,
+          "tool_execution": 10,
+          "jev_inference": 2310,
+          "qwen_inference": 3594,
+          "json_pydantic_validation": 1
+        },
+        "llm_call_count": 3,
+        "heavy_execution_mode": "full"
+      },
+      "llm_call_count": 3,
+      "fallback_reason": "model_error",
+      "full_latency_seconds": 13.008447
+    },
+    {
+      "set": "exploratory",
+      "id": "ambiguous-short",
+      "query": "Куда сходить?",
+      "expected_args": null,
+      "source_seed_event_id": null,
+      "status": "clarification",
+      "message": "Уточните город, дату, категорию или другое условие поиска.",
+      "returned_event_ids": [],
+      "trace": {
+        "trace_id": "simple-latency-4e8fb5cf2ccc4e63b394b8b82cac9990",
+        "request_id": "simple-latency-4e8fb5cf2ccc4e63b394b8b82cac9990",
+        "conversation_id": "simple-latency-4e8fb5cf2ccc4e63b394b8b82cac9990",
+        "user_query": null,
+        "plan_summary": "fallback intent=search_events; tools=none",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 0,
+          "message_length": 13,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": false,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [],
+        "result_ids": [],
+        "latency_ms": 4991,
+        "input_tokens": 199,
+        "output_tokens": 30,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 199,
+            "output_tokens": 30
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [],
+        "stop_reason": "clarification",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": "missing_conditions",
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-4e8fb5cf2ccc4e63b394b8b82cac9990",
+            "session_id": "simple-latency-4e8fb5cf2ccc4e63b394b8b82cac9990",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:36:45.921119+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 199,
+            "completion_tokens": 30,
+            "completion_length": 83,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 4969,
+            "prefill_ms": 67.036,
+            "decode_ms": 2474.881,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 4970,
+            "structured_validation_latency_ms": 2
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "smart_interpretation": 4984,
+          "response_formatting": 5,
+          "tool_execution": 0,
+          "jev_inference": 0,
+          "qwen_inference": 4969,
+          "json_pydantic_validation": 2
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": "missing_conditions",
+      "full_latency_seconds": 5.000467
+    },
+    {
+      "set": "exploratory",
+      "id": "status-original",
+      "query": "Отменили ли концерт 15 ноября?",
+      "expected_args": null,
+      "source_seed_event_id": null,
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: категория концерт, период с 2026-11-15, период до 2026-11-15.",
+      "returned_event_ids": [
+        "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+        "11111111-1111-4111-8111-000000000009"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-71175924a8c943e5994a57c467f33c88",
+        "request_id": "simple-latency-71175924a8c943e5994a57c467f33c88",
+        "conversation_id": "simple-latency-71175924a8c943e5994a57c467f33c88",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=event_status; tools=search_events",
+        "routing_features": {
+          "intent": "event_status",
+          "constraint_count": 1,
+          "message_length": 30,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": false,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-15",
+              "date_to": "2026-11-15",
+              "city": null,
+              "category": "концерт",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+          "11111111-1111-4111-8111-000000000009"
+        ],
+        "latency_ms": 5483,
+        "input_tokens": 213,
+        "output_tokens": 82,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 213,
+            "output_tokens": 82
+          },
+          {
+            "model_name": "qwen2.5-1.5b-router",
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": {
+          "router_payload": {
+            "intent": "event_status",
+            "constraint_count": 1,
+            "message_length": 30,
+            "dialogue_turns": 0,
+            "requires_tools": true,
+            "requires_multi_step": false,
+            "requires_comparison": false,
+            "requires_temporal_reasoning": false,
+            "requires_geo_reasoning": false,
+            "requires_dialogue_context": false,
+            "requires_clarification": false,
+            "dialogue_depth": 0,
+            "has_previous_results": false,
+            "possible_prompt_injection": false,
+            "possible_jailbreak": false,
+            "possible_prompt_leak_attempt": false,
+            "possible_sql_injection": false
+          },
+          "route": "LIGHT",
+          "jev_route": "LIGHT",
+          "confidence": 0.95,
+          "reason_code": "simple_search",
+          "latency_ms": 1958,
+          "router_error": null,
+          "fallback": false,
+          "cache_status": "disabled"
+        },
+        "adaptive_route": "DEEP",
+        "execution_path": "LEGACY",
+        "route_reason": "unsupported_intent_legacy",
+        "light_confidence": 1.0,
+        "light_proposed_tool": "search_events",
+        "light_escalation_reason": null,
+        "light_schema_valid": true,
+        "tool_result_ids": [
+          [
+            "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+            "11111111-1111-4111-8111-000000000009"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+          "11111111-1111-4111-8111-000000000009"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-71175924a8c943e5994a57c467f33c88",
+            "session_id": "simple-latency-71175924a8c943e5994a57c467f33c88",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:36:50.916139+00:00",
+            "route": "ROUTER",
+            "model_alias": "qwen2.5-1.5b-router",
+            "schema_validation": "success",
+            "inference_latency_ms": 1958,
+            "http_status": 200,
+            "structured_validation_latency_ms": 0,
+            "latency_ms": 1958
+          },
+          {
+            "request_id": "simple-latency-71175924a8c943e5994a57c467f33c88",
+            "session_id": "simple-latency-71175924a8c943e5994a57c467f33c88",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:36:52.886493+00:00",
+            "route": "LIGHT",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 213,
+            "completion_tokens": 82,
+            "completion_length": 209,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 3489,
+            "prefill_ms": 48.057,
+            "decode_ms": 3423.347,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 3489,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 1,
+          "routing": 1958,
+          "qwen_light": 3506,
+          "response_formatting": 11,
+          "tool_execution": 5,
+          "jev_inference": 1958,
+          "qwen_inference": 3489,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 2,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 2,
+      "fallback_reason": null,
+      "full_latency_seconds": 5.493011
+    },
+    {
+      "set": "exploratory",
+      "id": "status-short",
+      "query": "Концерт 15 ноября отменён?",
+      "expected_args": null,
+      "source_seed_event_id": null,
+      "status": "ok",
+      "message": "Подобрал события с учётом условий: категория концерт, период с 2026-11-15, период до 2026-11-15.",
+      "returned_event_ids": [
+        "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+        "11111111-1111-4111-8111-000000000009"
+      ],
+      "trace": {
+        "trace_id": "simple-latency-382ff5a4f8614b59860e7b704d2f3b16",
+        "request_id": "simple-latency-382ff5a4f8614b59860e7b704d2f3b16",
+        "conversation_id": "simple-latency-382ff5a4f8614b59860e7b704d2f3b16",
+        "user_query": null,
+        "plan_summary": "LIGHT intent=event_status; tools=search_events",
+        "routing_features": {
+          "intent": "event_status",
+          "constraint_count": 1,
+          "message_length": 26,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": false,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "date_from": "2026-11-15",
+              "date_to": "2026-11-15",
+              "city": null,
+              "category": "концерт",
+              "time_after": null,
+              "time_before": null,
+              "max_duration_min": null,
+              "max_price": null,
+              "is_free_only": false,
+              "max_age_limit": null,
+              "limit": 20,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [
+          "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+          "11111111-1111-4111-8111-000000000009"
+        ],
+        "latency_ms": 6339,
+        "input_tokens": 212,
+        "output_tokens": 81,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 212,
+            "output_tokens": 81
+          },
+          {
+            "model_name": "qwen2.5-1.5b-router",
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": {
+          "router_payload": {
+            "intent": "event_status",
+            "constraint_count": 1,
+            "message_length": 26,
+            "dialogue_turns": 0,
+            "requires_tools": true,
+            "requires_multi_step": false,
+            "requires_comparison": false,
+            "requires_temporal_reasoning": false,
+            "requires_geo_reasoning": false,
+            "requires_dialogue_context": false,
+            "requires_clarification": false,
+            "dialogue_depth": 0,
+            "has_previous_results": false,
+            "possible_prompt_injection": false,
+            "possible_jailbreak": false,
+            "possible_prompt_leak_attempt": false,
+            "possible_sql_injection": false
+          },
+          "route": "LIGHT",
+          "jev_route": "LIGHT",
+          "confidence": 0.95,
+          "reason_code": "simple_search",
+          "latency_ms": 1337,
+          "router_error": null,
+          "fallback": false,
+          "cache_status": "disabled"
+        },
+        "adaptive_route": "DEEP",
+        "execution_path": "LEGACY",
+        "route_reason": "unsupported_intent_legacy",
+        "light_confidence": 1.0,
+        "light_proposed_tool": "search_events",
+        "light_escalation_reason": null,
+        "light_schema_valid": true,
+        "tool_result_ids": [
+          [
+            "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+            "11111111-1111-4111-8111-000000000009"
+          ]
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [
+          "dd7348e7-f2a6-58b3-a428-b154e60ca313",
+          "11111111-1111-4111-8111-000000000009"
+        ],
+        "stop_reason": "completed",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": null,
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-382ff5a4f8614b59860e7b704d2f3b16",
+            "session_id": "simple-latency-382ff5a4f8614b59860e7b704d2f3b16",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:36:56.407684+00:00",
+            "route": "ROUTER",
+            "model_alias": "qwen2.5-1.5b-router",
+            "schema_validation": "success",
+            "inference_latency_ms": 1337,
+            "http_status": 200,
+            "structured_validation_latency_ms": 0,
+            "latency_ms": 1337
+          },
+          {
+            "request_id": "simple-latency-382ff5a4f8614b59860e7b704d2f3b16",
+            "session_id": "simple-latency-382ff5a4f8614b59860e7b704d2f3b16",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:36:57.755837+00:00",
+            "route": "LIGHT",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 212,
+            "completion_tokens": 81,
+            "completion_length": 204,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 4967,
+            "prefill_ms": 39.643,
+            "decode_ms": 4913.11,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 4967,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 0,
+          "routing": 1337,
+          "qwen_light": 4985,
+          "response_formatting": 10,
+          "tool_execution": 3,
+          "jev_inference": 1337,
+          "qwen_inference": 4967,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 2,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 2,
+      "fallback_reason": null,
+      "full_latency_seconds": 6.345742
+    },
+    {
+      "set": "exploratory",
+      "id": "empty-original",
+      "query": "Есть ли в Салавате джаз на следующей неделе?",
+      "expected_args": null,
+      "source_seed_event_id": null,
+      "status": "clarification",
+      "message": "Уточните город или категорию мероприятия.",
+      "returned_event_ids": [],
+      "trace": {
+        "trace_id": "simple-latency-49550c70a0474e24bdfb6132475abcc5",
+        "request_id": "simple-latency-49550c70a0474e24bdfb6132475abcc5",
+        "conversation_id": "simple-latency-49550c70a0474e24bdfb6132475abcc5",
+        "user_query": null,
+        "plan_summary": "fallback intent=search_events; tools=none",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 44,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": true,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [],
+        "result_ids": [],
+        "latency_ms": 2274,
+        "input_tokens": 212,
+        "output_tokens": 38,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 212,
+            "output_tokens": 38
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [],
+        "stop_reason": "clarification",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": "unknown_category",
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-49550c70a0474e24bdfb6132475abcc5",
+            "session_id": "simple-latency-49550c70a0474e24bdfb6132475abcc5",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:37:02.757446+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 212,
+            "completion_tokens": 38,
+            "completion_length": 103,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 2249,
+            "prefill_ms": 458.786,
+            "decode_ms": 1773.275,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 2249,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 0,
+          "smart_interpretation": 2258,
+          "response_formatting": 13,
+          "tool_execution": 0,
+          "jev_inference": 0,
+          "qwen_inference": 2249,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": "unknown_category",
+      "full_latency_seconds": 2.281276
+    },
+    {
+      "set": "exploratory",
+      "id": "empty-short",
+      "query": "Джаз в Салавате на следующей неделе",
+      "expected_args": null,
+      "source_seed_event_id": null,
+      "status": "clarification",
+      "message": "Уточните город или категорию мероприятия.",
+      "returned_event_ids": [],
+      "trace": {
+        "trace_id": "simple-latency-73a72e6520ec4a9aac17f0e56a1f65c7",
+        "request_id": "simple-latency-73a72e6520ec4a9aac17f0e56a1f65c7",
+        "conversation_id": "simple-latency-73a72e6520ec4a9aac17f0e56a1f65c7",
+        "user_query": null,
+        "plan_summary": "fallback intent=search_events; tools=none",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 35,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": true,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [],
+        "result_ids": [],
+        "latency_ms": 2273,
+        "input_tokens": 209,
+        "output_tokens": 48,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 209,
+            "output_tokens": 48
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [],
+        "stop_reason": "clarification",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": "unknown_category",
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-73a72e6520ec4a9aac17f0e56a1f65c7",
+            "session_id": "simple-latency-73a72e6520ec4a9aac17f0e56a1f65c7",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:37:05.036507+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 209,
+            "completion_tokens": 48,
+            "completion_length": 149,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "success",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 2249,
+            "prefill_ms": 424.918,
+            "decode_ms": 1820.021,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 2249,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 0,
+          "smart_interpretation": 2258,
+          "response_formatting": 12,
+          "tool_execution": 0,
+          "jev_inference": 0,
+          "qwen_inference": 2249,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": "unknown_category",
+      "full_latency_seconds": 2.279711
+    },
+    {
+      "set": "exploratory",
+      "id": "empty-future-1",
+      "query": "Концерт в Уфе 1 января 2099 года",
+      "expected_args": null,
+      "source_seed_event_id": null,
+      "status": "no_data",
+      "message": "🔍 По вашему запросу подходящих мероприятий не найдено\nЗаданные условия: город: Уфа, категория: концерт, дата: 2099-01-01\n\n💡 Рекомендация — какое ограничение можно ослабить:\n• расширить дату и время поиска — найдётся событий: 8",
+      "returned_event_ids": [],
+      "trace": {
+        "trace_id": "simple-latency-9d03a41fe6dd4f3c82e4223b986ba54e",
+        "request_id": "simple-latency-9d03a41fe6dd4f3c82e4223b986ba54e",
+        "conversation_id": "simple-latency-9d03a41fe6dd4f3c82e4223b986ba54e",
+        "user_query": null,
+        "plan_summary": "fallback intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 32,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "city": "Уфа",
+              "category": "концерт",
+              "date_from": "2099-01-01",
+              "date_to": "2099-01-01",
+              "is_free_only": false,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [],
+        "latency_ms": 2265,
+        "input_tokens": 210,
+        "output_tokens": 44,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 210,
+            "output_tokens": 44
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          []
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [],
+        "stop_reason": "no_data",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": "smart_invalid_json",
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-9d03a41fe6dd4f3c82e4223b986ba54e",
+            "session_id": "simple-latency-9d03a41fe6dd4f3c82e4223b986ba54e",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:37:07.318835+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 210,
+            "completion_tokens": 44,
+            "completion_length": 98,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "failure",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 2234,
+            "prefill_ms": 467.056,
+            "decode_ms": 1763.642,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 2234,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 0,
+          "smart_interpretation": 2239,
+          "response_formatting": 5,
+          "tool_execution": 9,
+          "jev_inference": 0,
+          "qwen_inference": 2234,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": "smart_invalid_json",
+      "full_latency_seconds": 2.272408
+    },
+    {
+      "set": "exploratory",
+      "id": "empty-future-2",
+      "query": "Выставка в Салавате 2 февраля 2099 года",
+      "expected_args": null,
+      "source_seed_event_id": null,
+      "status": "no_data",
+      "message": "🔍 По вашему запросу подходящих мероприятий не найдено\nЗаданные условия: город: Салават, категория: выставка, дата: 2099-02-02\n\n💡 Рекомендация — какое ограничение можно ослабить:\n• расширить дату и время поиска — найдётся событий: 2",
+      "returned_event_ids": [],
+      "trace": {
+        "trace_id": "simple-latency-abf570f0d1524871964baf65a1ca22e5",
+        "request_id": "simple-latency-abf570f0d1524871964baf65a1ca22e5",
+        "conversation_id": "simple-latency-abf570f0d1524871964baf65a1ca22e5",
+        "user_query": null,
+        "plan_summary": "fallback intent=search_events; tools=search_events",
+        "routing_features": {
+          "intent": "search_events",
+          "constraint_count": 2,
+          "message_length": 39,
+          "dialogue_turns": 0,
+          "requires_tools": true,
+          "requires_multi_step": false,
+          "requires_comparison": false,
+          "requires_temporal_reasoning": false,
+          "requires_geo_reasoning": true,
+          "requires_dialogue_context": false,
+          "requires_clarification": false,
+          "dialogue_depth": 0,
+          "has_previous_results": false,
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "model_route": "LIGHT",
+        "model_name": "qwen2.5-3b-local",
+        "tool_calls": [
+          {
+            "name": "search_events",
+            "arguments": {
+              "city": "Салават",
+              "category": "выставка",
+              "date_from": "2099-02-02",
+              "date_to": "2099-02-02",
+              "is_free_only": false,
+              "offset": 0
+            }
+          }
+        ],
+        "result_ids": [],
+        "latency_ms": 2012,
+        "input_tokens": 211,
+        "output_tokens": 42,
+        "cost": "0",
+        "model_usage": [
+          {
+            "model_name": "qwen2.5-3b-local",
+            "input_tokens": 211,
+            "output_tokens": 42
+          }
+        ],
+        "security_flags": {
+          "possible_prompt_injection": false,
+          "possible_jailbreak": false,
+          "possible_prompt_leak_attempt": false,
+          "possible_sql_injection": false
+        },
+        "security_events": [],
+        "policy_decision": "allowed",
+        "reason_code": null,
+        "router_decision": null,
+        "adaptive_route": "SMART",
+        "execution_path": "SMART",
+        "route_reason": "natural_language_search",
+        "light_confidence": null,
+        "light_proposed_tool": null,
+        "light_escalation_reason": null,
+        "light_schema_valid": null,
+        "tool_result_ids": [
+          []
+        ],
+        "number_of_steps": 0,
+        "repair_attempts": 0,
+        "max_context_tokens": 0,
+        "basis_event_ids": [],
+        "stop_reason": "no_data",
+        "selected_models": [
+          "qwen2.5-3b-local"
+        ],
+        "escalated": false,
+        "fallback_reason": "smart_invalid_json",
+        "inference_diagnostics": [
+          {
+            "request_id": "simple-latency-abf570f0d1524871964baf65a1ca22e5",
+            "session_id": "simple-latency-abf570f0d1524871964baf65a1ca22e5",
+            "turn_ref": 1,
+            "timestamp": "2026-11-15T04:37:09.591883+00:00",
+            "route": "SMART",
+            "model_alias": "qwen2.5-3b-local",
+            "prompt_tokens": 211,
+            "completion_tokens": 42,
+            "completion_length": 113,
+            "finish_reason": "stop",
+            "http_status": 200,
+            "json_parse": "success",
+            "schema_validation": "failure",
+            "tool_name_validation": "not_applicable",
+            "tool_argument_validation": "not_applicable",
+            "error_category": null,
+            "inference_latency_ms": 1980,
+            "prefill_ms": 456.294,
+            "decode_ms": 1520.051,
+            "json_validation_latency_ms": 0,
+            "latency_ms": 1980,
+            "structured_validation_latency_ms": 0
+          }
+        ],
+        "stage_latency_ms": {
+          "dialogue_state_resolution": 0,
+          "smart_interpretation": 1985,
+          "response_formatting": 8,
+          "tool_execution": 8,
+          "jev_inference": 0,
+          "qwen_inference": 1980,
+          "json_pydantic_validation": 0
+        },
+        "llm_call_count": 1,
+        "heavy_execution_mode": null
+      },
+      "llm_call_count": 1,
+      "fallback_reason": "smart_invalid_json",
+      "full_latency_seconds": 2.020057
+    }
+  ]
+}
