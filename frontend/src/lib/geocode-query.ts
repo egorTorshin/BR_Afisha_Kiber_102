@@ -7,10 +7,10 @@ export function normalizedStreet(address: string, city: string): string {
       !/^(?:россия|рф|(?:(?:респ\.?|республика)\s+)?башкортостан)$/i.test(part);
   }).join(", ");
   return street
-    .replace(/(^|[\s,])ул\.?\s*/giu, "$1улица ")
-    .replace(/(^|[\s,])пр-кт\.?\s*/giu, "$1проспект ")
-    .replace(/(^|[\s,])просп\.?\s*/giu, "$1проспект ")
-    .replace(/(^|[\s,])пр\.?\s*/giu, "$1проспект ")
+    .replace(/(^|[\s,])(?:ул\.|ул(?=\s))\s*/giu, "$1улица ")
+    .replace(/(^|[\s,])(?:пр-кт\.|пр-кт(?=\s))\s*/giu, "$1проспект ")
+    .replace(/(^|[\s,])(?:просп\.|просп(?=\s))\s*/giu, "$1проспект ")
+    .replace(/(^|[\s,])(?:пр\.|пр(?=\s))\s*/giu, "$1проспект ")
     .replace(/(^|[\s,])д\.?\s*(?=\d)/giu, "$1")
     .replace(/\s+/g, " ").trim();
 }

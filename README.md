@@ -88,7 +88,7 @@ docker compose logs --tail=100 gkz-collector venue-collector kassir-collector
 
 ## Боты, голос и модели
 
-Для Telegram задайте `TELEGRAM_BOT_TOKEN` в `.env` и положите конфиг sing-box в `vpn/gateway.json`. Обычный `docker compose up -d --build --wait` сам создаёт конфиг шлюза в отдельном томе Docker, запускает sing-box и затем бот. Только Telegram Bot API (`api.telegram.org`) отправляется через VPN; остальные запросы через этот шлюз идут напрямую. `bot` использует шлюз исключительно для HTTP-клиента Telegram, остальные его клиенты и все другие сервисы работают без прокси. После изменения `vpn/gateway.json` пересоздайте `telegram-vpn-config` и `telegram-vpn`.
+Для Telegram задайте `TELEGRAM_BOT_TOKEN` в `.env` и поместите ссылку VLESS в `vpn/vpn.txt` либо конфиг sing-box в `vpn/gateway.json` с исходящим подключением `proxy`. При наличии обоих файлов используется `vpn.txt`. Обычный `docker compose up -d --build --wait` сам создаёт конфиг шлюза в отдельном томе Docker, запускает sing-box и затем бот. Только Telegram Bot API (`api.telegram.org`) отправляется через VPN; остальные запросы идут напрямую. После изменения файла пересоздайте `telegram-vpn-config` и `telegram-vpn`. Файлы в `vpn/` содержат данные доступа и не входят в Git.
 
 Для MAX задайте `MAX_BOT_ENABLED=true` и `MAX_BOT_TOKEN`. Без `MAX_WEBHOOK_URL` используется polling для разработки. Для webhook нужен публичный HTTPS URL, заканчивающийся на `/webhook`, и `MAX_WEBHOOK_SECRET` длиной не менее 16 символов; внешний reverse proxy направляет запросы на `127.0.0.1:18081` (или порт из `MAX_WEBHOOK_PORT`). Telegram и MAX могут работать одновременно.
 

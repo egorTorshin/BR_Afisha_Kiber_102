@@ -160,7 +160,7 @@ services:
       VPN_SOURCE_CONFIG: /input/gateway.json
       VPN_GENERATED_CONFIG: /output/telegram-gateway.json
     volumes:
-      - ./vpn/gateway.json:/input/gateway.json:ro
+      - ./vpn:/input:ro
       - ./scripts/prepare_telegram_vpn.py:/app/scripts/prepare_telegram_vpn.py:ro
       - telegramvpnconfig:/output
 
