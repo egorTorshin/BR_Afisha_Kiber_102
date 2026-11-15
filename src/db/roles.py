@@ -46,7 +46,11 @@ ROLE_TABLES = {
 for role in ('afisha_api', 'afisha_bot'):
     permissions = ROLE_TABLES[role]
     for action in ('SELECT', 'INSERT', 'UPDATE'):
-        permissions[action] += ('users', 'user_identities', 'event_views')
+        permissions[action] += ('users', 'user_identities', 'event_views', 'agent_cost_budgets')
+    permissions['UPDATE'] += ('agent_traces',)
+    for action in ('SELECT', 'INSERT'):
+        permissions[action] += ('agent_cost_reservations',)
+    permissions['DELETE'] += ('agent_cost_reservations',)
     if role == 'afisha_api':
         for action in ('SELECT', 'INSERT', 'UPDATE'):
             permissions[action] += ('user_sessions',)

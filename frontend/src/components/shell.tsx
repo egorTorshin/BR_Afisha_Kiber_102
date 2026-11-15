@@ -74,7 +74,7 @@ export function Footer() {
   return (
     <footer className="site-footer">
       <div className="container cultural-finale">
-        <div className="cultural-finale-heading"><span>Башкортостан в линиях</span><BashkirOrnament /></div>
+        <div className="cultural-finale-heading"><BashkirOrnament /></div>
         <div className="cultural-skyline" role="img" aria-label="Геометрическая панорама: курай, Монумент Дружбы, мечеть Ляля-Тюльпан, театр оперы и балета, Конгресс-холл Торатау и шиханы">{places.map(kind => <div className={`cultural-skyline-place cultural-skyline-${kind}`} key={kind}><GeometricLandmark kind={kind} /></div>)}</div>
       </div>
       <div className="container footer-inner">

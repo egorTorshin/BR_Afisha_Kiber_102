@@ -3,7 +3,6 @@
 import Link from "next/link";
 import {
   ArrowRight,
-  Search,
   AlertCircle,
   LoaderCircle,
 } from "lucide-react";
@@ -13,32 +12,6 @@ import { formatDate } from "@/lib/format-date";
 import { RetryButton } from "./retry-button";
 import { CategoryIllustration } from "./category-illustration";
 import { BashkirCorner, BashkirOrnament } from "./cultural-art";
-import { useRef, useState } from "react";
-export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
-  const input = useRef<HTMLInputElement>(null);
-  const [value, setValue] = useState(defaultValue);
-  return (
-    <div className="search-field">
-      <Search size={21} aria-hidden="true" />
-      <label className="sr-only" htmlFor="event-search">
-        Название события или ключевые слова
-      </label>
-      <input
-        id="event-search"
-        type="search"
-        name="query_text"
-        placeholder="Название, площадка или тема"
-        value={value}
-        onChange={(event) => setValue(event.currentTarget.value)}
-        ref={input}
-      />
-      {value && <button className="reset-link" type="button" aria-label="Очистить поиск" onClick={() => { setValue(""); input.current?.form?.requestSubmit(); }}>Очистить</button>}
-      <button className="button" type="submit">
-        Найти
-      </button>
-    </div>
-  );
-}
 export function EventStatusBadge({
   status,
   disputed = false,
@@ -66,12 +39,12 @@ export function EventCard({ event, returnHref }: { event: CultureEvent; returnHr
   const category = event.category?.toLocaleLowerCase("ru-RU") || "другое";
   const posterTone = category.includes("концерт") ? "music" : category.includes("спектакль") ? "theatre" : category.includes("выстав") ? "exhibition" : category.includes("фестивал") ? "festival" : category.includes("кино") ? "cinema" : category.includes("экскурс") ? "excursion" : "other";
   return (
-    <article className="event-card">
+    <Link className="event-card" href={detailHref} aria-label={`Открыть событие: ${cardTitle(event.title)}`}>
       <div className="event-date" aria-label={validDate ? formatDate(event.date_start) : "Дата уточняется"}><strong>{validDate ? new Intl.DateTimeFormat("ru-RU", { day: "2-digit", timeZone: "Asia/Yekaterinburg" }).format(date) : "—"}</strong><span>{validDate ? new Intl.DateTimeFormat("ru-RU", { month: "short", timeZone: "Asia/Yekaterinburg" }).format(date) : "дата"}</span><small>{validDate ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Yekaterinburg" }).format(date) : ""}</small></div>
       <div className={`event-poster event-poster-${posterTone}`} aria-hidden="true"><span className="event-poster-category">{event.category}</span></div>
       <div className="event-card-body">
         <div className="event-meta"><span className="event-category-meta"><CategoryIllustration tone={posterTone} />{event.category}</span><span>{event.age_limit}+</span></div>
-        <h3><Link href={detailHref}>{cardTitle(event.title)}</Link></h3>
+        <h3>{cardTitle(event.title)}</h3>
         <p className="event-place">{event.city} · {event.venue}</p>
         <div className="event-card-bottom">
           {(event.is_free || event.price_min !== null) && <strong>
@@ -80,9 +53,9 @@ export function EventCard({ event, returnHref }: { event: CultureEvent; returnHr
           {(event.status !== "published" || event.is_disputed) &&
             <EventStatusBadge status={event.status} disputed={event.is_disputed} />}
         </div>
-        <Link className="event-open" href={detailHref}>Подробнее о событии <ArrowRight size={16} aria-hidden="true" /></Link>
+        <span className="event-open">Подробнее о событии <ArrowRight size={16} aria-hidden="true" /></span>
       </div>
-    </article>
+    </Link>
   );
 }
 export function LoadingState() {

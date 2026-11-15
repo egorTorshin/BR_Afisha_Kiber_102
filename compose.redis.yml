@@ -2,6 +2,7 @@ services:
   redis:
     profiles: [redis]
     image: redis:7-alpine
+    user: redis
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
     restart: unless-stopped
     read_only: true

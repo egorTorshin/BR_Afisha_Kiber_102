@@ -71,3 +71,41 @@ def test_failed_parse_never_writes():
     assert not result.ok
     assert db.fetchone("SELECT COUNT(*) AS n FROM events")["n"] == 0
     db.close()
+
+
+def test_venue_listing_retries_temporary_error(monkeypatch):
+    monkeypatch.setattr("src.services.http_retry.time.sleep", lambda _seconds: None)
+    calls = 0
+
+    def respond(request):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503, request=request)
+        return httpx.Response(200, text=NUR, request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(respond))
+    try:
+        result = VenueCollector(BY_CODE["nur"], client=client, retries=2).run()
+        assert result.ok
+        assert calls == 2
+    finally:
+        client.close()
+
+
+def test_venue_listing_does_not_retry_permanent_error(monkeypatch):
+    monkeypatch.setattr("src.services.http_retry.time.sleep", lambda _seconds: None)
+    calls = 0
+
+    def respond(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(404, request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(respond))
+    try:
+        result = VenueCollector(BY_CODE["nur"], client=client, retries=2).run()
+        assert not result.ok
+        assert calls == 1
+    finally:
+        client.close()

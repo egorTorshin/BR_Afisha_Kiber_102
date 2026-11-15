@@ -11,7 +11,7 @@ from typing import Optional
 
 from src.db.connection import Database
 from src.models.schemas import EventRecord, EventSource
-from src.services.event_series import group_rows, scheduled_record, series_key
+from src.services.event_series import group_rows, same_series, scheduled_record
 
 
 _PUNCTUATION = str.maketrans({char: " " for char in "«»\"'„“”()[],.!?;:—–-"})
@@ -122,7 +122,7 @@ class RecommendationService:
 
     def _published(self, *, city: Optional[str] = None, date_from: Optional[str] = None,
                    date_to: Optional[str] = None, group_series: bool = False,
-                   exclude_series_key: tuple[str, ...] | None = None) -> list[EventRecord]:
+                   exclude_series_row: dict | None = None) -> list[EventRecord]:
         clauses = ["status = 'published'", "merged_into IS NULL"]
         params: list[str] = []
         if city:
@@ -138,7 +138,7 @@ class RecommendationService:
             f"SELECT * FROM events WHERE {' AND '.join(clauses)} ORDER BY date_start, id", params)
         if group_series:
             return [scheduled_record(group) for group in group_rows(rows)
-                    if series_key(group[0]) != exclude_series_key]
+                    if exclude_series_row is None or not same_series(group[0], exclude_series_row)]
         return [EventRecord.from_row(row) for row in rows]
 
     def _with_sources(self, events: list[EventRecord]) -> None:
@@ -302,7 +302,7 @@ class RecommendationService:
             return []
         source = EventRecord.from_row(source_rows[0])
         candidates = self._published(city=city, date_from=date_from, date_to=date_to,
-                                     group_series=True, exclude_series_key=series_key(source_rows[0]))
+                                     group_series=True, exclude_series_row=source_rows[0])
         source_grams = _grams(" ".join((source.normalized_title, *sorted(self._features(source)[0][3]))))
         ranked: list[RecommendedEvent] = []
         for event in candidates:

@@ -138,6 +138,7 @@ services:
         condition: service_healthy
     environment:
       API_BASE_URL: http://api:8000
+      MAP_GEOCODER_URL: ${MAP_GEOCODER_URL:-https://nominatim.openstreetmap.org}
       NODE_ENV: production
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=64m
@@ -151,6 +152,30 @@ services:
       retries: 10
       start_period: 15s
 
+  telegram-vpn-config:
+    image: python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535
+    command: ["python", "/app/scripts/prepare_telegram_vpn.py"]
+    restart: "no"
+    environment:
+      VPN_SOURCE_CONFIG: /input/gateway.json
+      VPN_GENERATED_CONFIG: /output/telegram-gateway.json
+    volumes:
+      - ./vpn/gateway.json:/input/gateway.json:ro
+      - ./scripts/prepare_telegram_vpn.py:/app/scripts/prepare_telegram_vpn.py:ro
+      - telegramvpnconfig:/output
+
+  telegram-vpn:
+    image: ghcr.io/sagernet/sing-box:latest
+    environment:
+      ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER: "true"
+    command: ["run", "-c", "/etc/sing-box/telegram-gateway.json"]
+    restart: unless-stopped
+    depends_on:
+      telegram-vpn-config:
+        condition: service_completed_successfully
+    volumes:
+      - telegramvpnconfig:/etc/sing-box:ro
+
   bot:
     <<: *app-security
     build: .
@@ -158,11 +183,13 @@ services:
     depends_on:
       prepare:
         condition: service_completed_successfully
+      telegram-vpn:
+        condition: service_started
     environment:
       DATABASE_URL: postgresql://afisha_bot@db:5432/${POSTGRES_DB:-afisha_db}
       PGPASSWORD: ${BOT_DB_PASSWORD:?Set BOT_DB_PASSWORD in .env}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-}
+      TELEGRAM_PROXY_URL: http://telegram-vpn:2080
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       SPEECH_MAX_BYTES: ${SPEECH_MAX_BYTES:-20971520}
       SPEECH_MAX_DURATION_SEC: ${SPEECH_MAX_DURATION_SEC:-20}
@@ -268,6 +295,24 @@ services:
       VENUE_SOURCES_CONFIG: ${VENUE_SOURCES_CONFIG:-config/event_sources.json}
       VENUE_COLLECTION_TIMEOUT_SECONDS: ${VENUE_COLLECTION_TIMEOUT_SECONDS:-20}
 
+  kassir-collector:
+    <<: *app-security
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "src.kassir_scheduler"]
+    restart: unless-stopped
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://afisha_api@db:5432/${POSTGRES_DB:-afisha_db}
+      PGPASSWORD: ${API_DB_PASSWORD:?Set API_DB_PASSWORD in .env}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      KASSIR_COLLECTION_INTERVAL_SECONDS: ${KASSIR_COLLECTION_INTERVAL_SECONDS:-21600}
+      KASSIR_COLLECTION_TIMEOUT_SECONDS: ${KASSIR_COLLECTION_TIMEOUT_SECONDS:-20}
+      KASSIR_COLLECTION_RETRIES: ${KASSIR_COLLECTION_RETRIES:-2}
+
   prometheus:
     image: prom/prometheus:v3.5.0
     restart: unless-stopped
@@ -316,3 +361,4 @@ volumes:
   pgdata_live:
   prometheusdata:
   grafanadata:
+  telegramvpnconfig:

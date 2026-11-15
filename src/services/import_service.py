@@ -29,7 +29,7 @@ from src.services.normalizer import (
     resolve_category,
     resolve_city,
 )
-from src.services.event_series import scheduled_record, series_key
+from src.services.event_series import matching_series, scheduled_record, series_key
 
 
 class ImportService:
@@ -764,7 +764,7 @@ class ImportService:
                    AND search_city = ? AND search_venue = ?""",
                 (row["normalized_title"], row["search_city"], row["search_venue"]),
             )
-            ids = [candidate["id"] for candidate in candidates if series_key(candidate) == key]
+            ids = [candidate["id"] for candidate in matching_series(candidates, row)]
             for candidate_id in ids:
                 self._update_event_status(candidate_id, new_status, actor)
             updated = self.db.fetchall(
@@ -789,7 +789,7 @@ class ImportService:
                        AND search_city = ? AND search_venue = ?""",
                     (previous["normalized_title"], previous["search_city"], previous["search_venue"]),
                 )
-                members = [candidate for candidate in candidates if series_key(candidate) == key]
+                members = matching_series(candidates, previous)
             now_iso = datetime.now(timezone.utc).isoformat()
             for member in members:
                 self.db.execute("UPDATE events SET status = 'draft', status_locked = 1, updated_at = ? WHERE id = ?",
@@ -824,8 +824,8 @@ class ImportService:
                        AND search_city = ? AND search_venue = ?""",
                     (previous["normalized_title"], previous["search_city"], previous["search_venue"]),
                 )
-                peers = [item["id"] for item in candidates
-                         if item["id"] != event_id and series_key(item) == series_key(previous)]
+                peers = [item["id"] for item in matching_series(candidates, previous)
+                         if item["id"] != event_id]
             payload = dict(previous)
             payload["tags"] = json.loads(payload.get("tags") or "[]")
             payload.update({k: v for k, v in changes.items() if k in editable})

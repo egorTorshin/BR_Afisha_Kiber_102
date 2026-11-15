@@ -56,3 +56,47 @@ def test_same_title_with_different_description_stays_separate(db):
     importer.import_records(records, source_file="official", source_type="страница",
                             default_status="draft")
     assert len(AdminCatalogService(db).disputed_events()) == 2
+
+
+def test_date_introduction_joins_existing_schedule(db):
+    importer = ImportService(db)
+    description = ("Щелкунчик рассказывает историю Маши и её путешествия в волшебную страну. "
+                   "Музыка Чайковского сопровождает спектакль для всей семьи. ") * 12
+    dates = ["2026-12-12T19:00:00", "2026-12-28T20:00:00",
+             "2026-12-29T20:00:00", "2027-01-03T18:00:00",
+             "2027-01-04T18:00:00", "2027-01-05T18:00:00",
+             "2027-01-06T18:00:00"]
+    records = [event(title="Балет «Щелкунчик»", category="спектакль",
+                     venue="ГКЗ «Башкортостан»", date_start=when,
+                     description=("12 декабря состоится балет «Щелкунчик»! " if index == 0 else "") + description,
+                     source_url=f"https://example.com/nutcracker-{index}")
+               for index, when in enumerate(dates)]
+    assert importer.import_records(records, "official", source_type="страница",
+                                   default_status="draft").added_count == 7
+    moderation = AdminCatalogService(db).disputed_events()
+    assert len(moderation) == 1
+    assert [show["date_start"] for show in moderation[0].schedule] == dates
+    importer.update_event_status(moderation[0].id, "published", actor="test")
+    assert {row["status"] for row in db.fetchall("SELECT status FROM events")} == {"published"}
+    search = SearchService(db)
+    page, total, _ = search.search(SearchFilters())
+    assert total == 1
+    assert len(page[0].schedule) == 7
+    assert len(search.get_event_by_id(page[0].id).schedule) == 7
+    filtered, total, _ = search.search(SearchFilters(date_from="2027-01-01T00:00:00"))
+    assert total == 1
+    assert len(filtered[0].schedule) == 7
+
+
+def test_similar_title_with_different_program_stays_separate(db):
+    importer = ImportService(db)
+    common = "Музыкальный фестиваль в исполнении приглашённых артистов. " * 4
+    records = [
+        event(title="Музыкальный фестиваль", description=common + "Выступает оркестр народных инструментов. " * 8,
+              source_url="https://example.com/first"),
+        event(title="Музыкальный фестиваль", date_start="2026-11-21T18:00:00",
+              description=common + "Выступает струнный квартет с другой программой. " * 8,
+              source_url="https://example.com/second"),
+    ]
+    importer.import_records(records, "official", source_type="страница", default_status="draft")
+    assert len(AdminCatalogService(db).disputed_events()) == 2

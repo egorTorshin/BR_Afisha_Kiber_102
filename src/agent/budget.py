@@ -146,9 +146,8 @@ def estimate_request_cost(settings: Settings, message: str) -> Decimal | None:
         if not isinstance(prices, dict) or "input" not in prices or "output" not in prices:
             # Local inference has no provider charge. Remote usage must be priced
             # before it can pass a configured spend budget.
-            if (settings.ai_mode == "local-ai" and not settings.jev_enabled
-                    and not settings.model_prices and model in {
-                        settings.light_model, settings.heavy_model}):
+            if (settings.ai_mode == "local-ai" and not settings.model_prices and model in {
+                    settings.jev_model, settings.light_model, settings.heavy_model}):
                 continue
             return None
         try:

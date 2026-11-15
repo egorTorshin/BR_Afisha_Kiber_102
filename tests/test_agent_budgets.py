@@ -83,6 +83,15 @@ def cost_settings(**changes):
     return Settings(**values)
 
 
+def test_local_router_and_models_have_no_provider_charge():
+    local = Settings(ai_mode="local-ai", jev_enabled=True, model_prices={})
+    assert estimate_request_cost(local, "Когда идет Щелкунчик?") == Decimal(0)
+    remote = Settings(ai_mode="native-ai", jev_enabled=True, model_prices={},
+                      jev_base_url="http://127.0.0.1:8081/v1",
+                      local_llm_base_url="http://127.0.0.1:8082/v1")
+    assert estimate_request_cost(remote, "Когда идет Щелкунчик?") is None
+
+
 def make_service(db, cfg, *, called=None):
     def light_factory(settings, registry):
         class MockLight:

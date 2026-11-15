@@ -87,12 +87,12 @@ export function AgentChat({ compact = false }: { compact?: boolean }) {
       {cards.length > 0 && (
         <div className="agent-search-results" aria-live="polite"><p className="results-note">Подобрано событий: {cards.length}</p><div className="agent-card-grid">
           {cards.map((card) => (
-            <article className="agent-card" key={card.id}>
+            <Link className="agent-card" href={`/events/${encodeURIComponent(card.id)}`} aria-label={`Открыть событие: ${cardTitle(card.title)}`} key={card.id}>
               <p className="event-meta">{card.category} · {card.age_limit}+</p>
-              <h3><Link href={`/events/${encodeURIComponent(card.id)}`}>{cardTitle(card.title)}</Link></h3>
+              <h3>{cardTitle(card.title)}</h3>
               <p>{formatDate(card.date_start)} · {card.city}</p>
-              <div className="agent-card-bottom"><strong>{price(card)}</strong><Link className="text-link" href={`/events/${encodeURIComponent(card.id)}`}>Карточка <ArrowRight size={14} /></Link></div>
-            </article>
+              <div className="agent-card-bottom"><strong>{price(card)}</strong><span className="text-link">Карточка <ArrowRight size={14} /></span></div>
+            </Link>
           ))}
         </div></div>
       )}

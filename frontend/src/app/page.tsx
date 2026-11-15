@@ -48,11 +48,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
     </div></section>
     <Suspense fallback={null}><FeaturedEvents from={today} /></Suspense>
     <section id="catalog" className="catalog-page" aria-label="Афиша событий"><div className="container catalog-content">
-      <div className="catalog-heading"><div><span className="issue-label">Выберите своё событие</span><h2>Афиша <em>событий</em></h2><BashkirOrnament className="catalog-ornament" /></div><p>Ищите по названию или уточните город, дату и формат — подборка обновится под ваш запрос.</p></div>
-      <Suspense key={JSON.stringify(params)} fallback={<LoadingState />}><CatalogFilters filters={filters} /></Suspense>
+      <div className="catalog-heading"><div><span className="issue-label">Выберите своё событие</span><h2>Афиша <em>событий</em></h2><BashkirOrnament className="catalog-ornament" /></div><p>Опишите событие в умном поиске или уточните город, дату и формат — подборка обновится под ваш запрос.</p></div>
+      <Suspense fallback={<LoadingState />}><CatalogFilters filters={filters} /></Suspense>
       <ResultsToolbar filters={filters} />
       <section id="results" aria-label="Результаты поиска" tabIndex={-1}>
-        <Suspense key={JSON.stringify(filters)} fallback={<LoadingState />}><EventResults filters={filters} /></Suspense>
+        <Suspense fallback={<LoadingState />}><EventResults filters={filters} /></Suspense>
       </section>
     </div></section>
   </>;

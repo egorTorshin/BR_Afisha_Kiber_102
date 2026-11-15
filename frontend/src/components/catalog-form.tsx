@@ -4,7 +4,6 @@ import Form from "next/form";
 import Link from "next/link";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { AgentChat } from "./agent-chat";
-import { SearchBar } from "./ui";
 import { eventsHref } from "@/lib/event-query";
 import type { CategoryItem, CityItem, EventFilters, VenueItem } from "@/lib/types";
 
@@ -51,7 +50,7 @@ function FilterChips({ filters }: { filters: EventFilters }) {
   const labels: [keyof EventFilters, string][] = [["query_text", "Поиск"], ["city", "Город"], ["category", "Категория"], ["date_from", "Дата с"], ["date_to", "Дата по"], ["venue", "Площадка"], ["max_price", "Цена до"], ["max_age_limit", "Возраст до"], ["is_free_only", "Бесплатные"]];
   const active = labels.filter(([key]) => filters[key] !== undefined && filters[key] !== false && filters[key] !== "");
   if (!active.length) return null;
-  return <div className="active-filters" aria-label="Применённые фильтры"><span className="active-filters-label">Фильтры:</span>{active.map(([key, label]) => { const value = filters[key]; const text = key === "is_free_only" ? "Бесплатные" : `${label}: ${key === "date_from" || key === "date_to" ? shortDate(String(value)) : String(value)}`; return <Link className="filter-chip" key={key} href={eventsHref({ ...filters, [key]: undefined, page: 1 })} aria-label={`Удалить фильтр: ${text}`}>{text}<span aria-hidden="true">×</span></Link>; })}<Link className="reset-link" href="/?sort=date_asc#catalog">Сбросить всё</Link></div>;
+  return <div className="active-filters" aria-label="Применённые фильтры"><span className="active-filters-label">Фильтры:</span>{active.map(([key, label]) => { const value = filters[key]; const text = key === "is_free_only" ? "Бесплатные" : `${label}: ${key === "date_from" || key === "date_to" ? shortDate(String(value)) : String(value)}`; return <Link className="filter-chip" key={key} href={eventsHref({ ...filters, [key]: undefined, page: 1 })} scroll={false} aria-label={`Удалить фильтр: ${text}`}>{text}<span aria-hidden="true">×</span></Link>; })}<Link className="reset-link" href="/?sort=date_asc" scroll={false}>Сбросить всё</Link></div>;
 }
 
 export function CatalogForm({ filters, cities, categories }: { filters: EventFilters; cities: CityItem[]; categories: CategoryItem[]; venues: VenueItem[] }) {
@@ -68,8 +67,8 @@ export function CatalogForm({ filters, cities, categories }: { filters: EventFil
   const advancedActive = Boolean(filters.venue || filters.max_price !== undefined || filters.max_age_limit !== undefined || filters.is_free_only);
   return <>
     <div className="catalog-agent"><AgentChat compact /></div>
-    <Form action="/" className="catalog-form" aria-label="Фильтры мероприятий">
-      <SearchBar key={filters.query_text || ""} defaultValue={filters.query_text || ""} />
+    <Form action="/" scroll={false} className="catalog-form" aria-label="Фильтры мероприятий">
+      {filters.query_text && <input type="hidden" name="query_text" value={filters.query_text} />}
       <input type="hidden" name="page" value="1" />
       <div className="filter-controls" ref={root}>
         <div className="filter-triggers">
@@ -92,10 +91,25 @@ export function CatalogForm({ filters, cities, categories }: { filters: EventFil
   </>;
 }
 
+function openToolbarOnHover(event: ReactMouseEvent<HTMLDetailsElement>) {
+  if (window.matchMedia("(hover: hover)").matches) event.currentTarget.open = true;
+}
+
+function closeToolbarOnLeave(event: ReactMouseEvent<HTMLDetailsElement>) {
+  if (window.matchMedia("(hover: hover)").matches) event.currentTarget.open = false;
+}
+
+function keepToolbarOpenOnClick(event: ReactMouseEvent<HTMLElement>) {
+  if (event.detail > 0 && window.matchMedia("(hover: hover)").matches) {
+    event.preventDefault();
+    event.currentTarget.parentElement?.setAttribute("open", "");
+  }
+}
+
 export function ResultsToolbar({ filters }: { filters: EventFilters }) {
   const preserved = Object.entries(filters).filter(([key, value]) => !["sort", "page_size", "page"].includes(key) && value !== undefined && value !== false);
   const base = Object.fromEntries(preserved) as EventFilters;
   const sorts = [["date_asc", "Ближайшие"], ["date_desc", "Поздние"], ["price_asc", "Дешевле"]] as const;
   const activeSort = sorts.find(([value]) => value === filters.sort)?.[1] || sorts[0][1];
-  return <div className="results-toolbar" aria-label="Настройки выдачи"><span>Результаты афиши</span><div className="toolbar-options"><details className="toolbar-menu"><summary>Порядок: <strong>{activeSort}</strong></summary><div className="toolbar-popover">{sorts.map(([value, label]) => <Link key={value} href={eventsHref({ ...base, sort: value, page_size: filters.page_size, page: 1 })} onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")} aria-current={filters.sort === value ? "true" : undefined}>{label}</Link>)}</div></details><details className="toolbar-menu"><summary>Карточек: <strong>{filters.page_size || 12}</strong></summary><div className="toolbar-popover">{[...new Set([12, 24, 48, filters.page_size || 12])].sort((a,b) => a-b).map((size) => <Link key={size} href={eventsHref({ ...base, sort: filters.sort, page_size: size, page: 1 })} onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")} aria-current={filters.page_size === size ? "true" : undefined}>{size} событий</Link>)}</div></details></div></div>;
+  return <div className="results-toolbar" aria-label="Настройки выдачи"><span>Результаты афиши</span><div className="toolbar-options"><details className="toolbar-menu" onMouseEnter={openToolbarOnHover} onMouseLeave={closeToolbarOnLeave}><summary onClick={keepToolbarOpenOnClick}>Порядок: <strong>{activeSort}</strong></summary><div className="toolbar-popover">{sorts.map(([value, label]) => <Link key={value} href={eventsHref({ ...base, sort: value, page_size: filters.page_size, page: 1 })} scroll={false} onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")} aria-current={filters.sort === value ? "true" : undefined}>{label}</Link>)}</div></details><details className="toolbar-menu" onMouseEnter={openToolbarOnHover} onMouseLeave={closeToolbarOnLeave}><summary onClick={keepToolbarOpenOnClick}>Карточек: <strong>{filters.page_size || 12}</strong></summary><div className="toolbar-popover">{[...new Set([12, 24, 48, filters.page_size || 12])].sort((a,b) => a-b).map((size) => <Link key={size} href={eventsHref({ ...base, sort: filters.sort, page_size: size, page: 1 })} scroll={false} onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")} aria-current={filters.page_size === size ? "true" : undefined}>{size} событий</Link>)}</div></details></div></div>;
 }

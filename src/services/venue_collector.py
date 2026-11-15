@@ -19,6 +19,7 @@ import httpx
 
 from src.services.gkz_parser import _TreeParser, _has_class, _first
 from src.services.collector_dedup import find_existing
+from src.services.http_retry import get_source_page
 from src.services.import_service import ImportService
 from src.services.normalizer import compute_dedup_key, normalize_text
 
@@ -281,15 +282,17 @@ class VenueResult:
 
 
 class VenueCollector:
-    def __init__(self, venue: Venue, *, client: httpx.Client | None = None, timeout: float = 20.0):
-        if timeout <= 0:
-            raise ValueError("Таймаут должен быть положительным")
+    def __init__(self, venue: Venue, *, client: httpx.Client | None = None,
+                 timeout: float = 20.0, retries: int = 2):
+        if timeout <= 0 or retries < 0:
+            raise ValueError("Таймаут должен быть положительным, число повторов — неотрицательным")
         self.venue = venue
         headers = {"User-Agent": BROWSER_USER_AGENT if venue.code == "bashgf" else USER_AGENT,
                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
         self.client = client or httpx.Client(timeout=timeout, follow_redirects=True, trust_env=False,
                                              headers=headers)
         self.timeout = timeout
+        self.retries = retries
         self._owns_client = client is None
 
     def close(self):
@@ -300,8 +303,8 @@ class VenueCollector:
         stats: dict[str, Any] = {"source": self.venue.code, "parsed": 0, "accepted": 0,
                                  "duplicates": 0, "ambiguous": 0, "rejected": 0}
         try:
-            response = self.client.get(self.venue.url, timeout=self.timeout)
-            response.raise_for_status()
+            response = get_source_page(self.client, self.venue.url, timeout=self.timeout,
+                                       retries=self.retries)
             if not _official_url(str(response.url), self.venue):
                 raise ValueError("Источник перенаправил запрос на другой домен")
             if len(response.content) > 2_000_000:
@@ -316,8 +319,8 @@ class VenueCollector:
                     if not _official_url(record["source_url"], self.venue):
                         return False
                     try:
-                        detail_response = self.client.get(record["source_url"], timeout=min(self.timeout, 7.0))
-                        detail_response.raise_for_status()
+                        detail_response = get_source_page(self.client, record["source_url"],
+                                                          timeout=min(self.timeout, 7.0), retries=self.retries)
                         if len(detail_response.content) > 2_000_000:
                             return False
                         detail = parse_philharmonic_detail(detail_response.text)

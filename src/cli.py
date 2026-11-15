@@ -52,6 +52,11 @@ def main() -> int:
     from src.services.venue_collector import BY_CODE as configured_venue_codes
     p_venue.add_argument("source", choices=sorted(configured_venue_codes))
     p_venue.add_argument("--dry-run", action="store_true", help="Проверить страницу без записи в БД")
+    p_venue.add_argument("--retries", type=int, default=2, help="Число повторов временных сетевых ошибок")
+    p_kassir = sub.add_parser("collect-kassir", help="Собрать события из афиши ufa.kassir.ru")
+    p_kassir.add_argument("--dry-run", action="store_true", help="Проверить страницы без записи в БД")
+    p_kassir.add_argument("--timeout", type=float, default=20.0, help="Таймаут HTTP-запроса в секундах")
+    p_kassir.add_argument("--retries", type=int, default=2, help="Число повторов временных сетевых ошибок")
 
     # 1. import
     p_imp = sub.add_parser("import", help="Импорт событий из файла CSV или JSON")
@@ -144,7 +149,18 @@ def main() -> int:
 
     if args.command == "collect-venue" and args.dry_run:
         from src.services.venue_collector import BY_CODE, VenueCollector
-        collector = VenueCollector(BY_CODE[args.source])
+        collector = VenueCollector(BY_CODE[args.source], retries=args.retries)
+        try:
+            result = collector.run()
+        finally:
+            collector.close()
+        print(result.message)
+        print(result.stats)
+        return 0 if result.ok else 1
+
+    if args.command == "collect-kassir" and args.dry_run:
+        from src.services.kassir_collector import KassirCollector
+        collector = KassirCollector(timeout=args.timeout, retries=args.retries)
         try:
             result = collector.run()
         finally:
@@ -180,7 +196,20 @@ def main() -> int:
 
     if args.command == "collect-venue":
         from src.services.venue_collector import BY_CODE, VenueCollector
-        collector = VenueCollector(BY_CODE[args.source])
+        collector = VenueCollector(BY_CODE[args.source], retries=args.retries)
+        try:
+            result = collector.run(imp_service)
+        finally:
+            collector.close()
+        print(result.message)
+        print(result.stats)
+        if result.report:
+            print(format_import_report(result.report))
+        return 0 if result.ok else 1
+
+    if args.command == "collect-kassir":
+        from src.services.kassir_collector import KassirCollector
+        collector = KassirCollector(timeout=args.timeout, retries=args.retries)
         try:
             result = collector.run(imp_service)
         finally:

@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from src.services.gkz_parser import SOURCE_URL, parse_gkz_html, parse_gkz_detail_html
 from src.services.collector_dedup import find_existing
+from src.services.http_retry import get_source_page
 from src.services.import_service import ImportService
 from src.models.schemas import ImportReport
 
@@ -48,21 +49,9 @@ class GKZCollector:
             self.client.close()
 
     def _download(self):
-        for attempt in range(self.retries + 1):
-            try:
-                fetch_url = os.getenv("GKZ_FETCH_URL", SOURCE_URL)
-                response = self.client.get(fetch_url, timeout=self.timeout, headers={"User-Agent": USER_AGENT})
-                response.raise_for_status()
-                return response
-            except httpx.HTTPStatusError as exc:
-                status = exc.response.status_code
-                retryable = status == 429 or 500 <= status <= 599
-                if not retryable or attempt == self.retries:
-                    raise
-            except (httpx.TimeoutException, httpx.TransportError):
-                if attempt == self.retries:
-                    raise
-        raise RuntimeError("Загрузка ГКЗ не выполнена")
+        fetch_url = os.getenv("GKZ_FETCH_URL", SOURCE_URL)
+        return get_source_page(self.client, fetch_url, timeout=self.timeout,
+                               retries=self.retries, headers={"User-Agent": USER_AGENT})
 
     def collect(self, importer: ImportService, *, actor: str = "gkz_collector") -> GKZCollectionResult:
         try:
@@ -90,8 +79,8 @@ class GKZCollector:
             if parsed_url.scheme != "https" or parsed_url.hostname not in {"gkzbashkortostan.ru", "www.gkzbashkortostan.ru"}:
                 return False
             try:
-                response = self.client.get(record["source_url"], timeout=min(self.timeout, 7.0))
-                response.raise_for_status()
+                response = get_source_page(self.client, record["source_url"],
+                                           timeout=min(self.timeout, 7.0), retries=self.retries)
                 if len(response.content) > 2_000_000:
                     return False
                 detail = parse_gkz_detail_html(response.text)

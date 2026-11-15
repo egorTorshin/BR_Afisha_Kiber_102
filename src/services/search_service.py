@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.db.connection import Database
 from src.models.schemas import EventRecord, EventSource, SearchFilters
 from src.services.normalizer import normalize_text, resolve_category, resolve_city
-from src.services.event_series import attach_sources, group_rows, scheduled_record, series_key, series_partition_sql
+from src.services.event_series import attach_sources, group_rows, matching_series, scheduled_record, series_key
 
 
 class SearchService:
@@ -37,8 +37,7 @@ class SearchService:
                ORDER BY date_start, id""",
             (status, row["normalized_title"], row["search_city"], row["search_venue"]),
         )
-        key = series_key(row)
-        return [candidate for candidate in candidates if series_key(candidate) == key]
+        return matching_series(candidates, row)
 
     @staticmethod
     def distance_km(latitude: float, longitude: float, event: EventRecord) -> Optional[float]:
@@ -139,11 +138,8 @@ class SearchService:
 
     def count_matching(self, filters: SearchFilters) -> int:
         where_sql, params = self._query_sql(filters)
-        partition = series_partition_sql()
-        return int(self.db.fetchone(
-            f"""SELECT COUNT(*) AS n FROM (SELECT ROW_NUMBER() OVER
-            (PARTITION BY {partition} ORDER BY date_start, id) AS series_rank
-            FROM events WHERE {where_sql}) grouped WHERE series_rank = 1""", params)["n"])
+        rows = self.db.fetchall(f"SELECT * FROM events WHERE {where_sql}", params)
+        return len(group_rows(rows))
 
     def search(self, filters: SearchFilters, *, sort: str = "date_asc") -> Tuple[List[EventRecord], int, Optional[str]]:
         """
@@ -151,25 +147,24 @@ class SearchService:
         Возвращает: (список событий на текущей странице, общее число подходящих событий, подсказка при пустом результате).
         """
         where_sql, params = self._query_sql(filters)
-        total = self.count_matching(filters)
-        order_by = {
-            "date_asc": "date_start ASC, id ASC",
-            "date_desc": "date_start DESC, id DESC",
-            "price_asc": "(COALESCE(price_min, price_max) IS NULL) ASC, COALESCE(price_min, price_max) ASC, date_start ASC, id ASC",
-        }.get(sort)
-        if order_by is None:
+        if sort not in {"date_asc", "date_desc", "price_asc"}:
             raise ValueError("Недопустимая сортировка")
-        partition = series_partition_sql()
-        rank_order = "date_start DESC, id DESC" if sort == "date_desc" else "date_start ASC, id ASC"
-        rows = self.db.fetchall(
-            f"""SELECT * FROM (SELECT events.*, ROW_NUMBER() OVER
-            (PARTITION BY {partition} ORDER BY {rank_order}) AS series_rank
-            FROM events WHERE {where_sql}) grouped WHERE series_rank = 1
-            ORDER BY {order_by} LIMIT ? OFFSET ?""",
-            (*params, filters.limit, filters.offset),
-        )
-        full_groups = [self._series_rows(row, status="published") for row in rows]
-        page = [scheduled_record(full, representative=row) for full, row in zip(full_groups, rows)]
+        rows = self.db.fetchall(f"SELECT * FROM events WHERE {where_sql}", params)
+        groups = group_rows(rows)
+        total = len(groups)
+        representatives = [group[-1] if sort == "date_desc" else group[0] for group in groups]
+        if sort == "date_desc":
+            representatives.sort(key=lambda row: (row["date_start"], row["id"]), reverse=True)
+        elif sort == "price_asc":
+            representatives.sort(key=lambda row: (row["price_min"] is None and row["price_max"] is None,
+                                                   row["price_min"] if row["price_min"] is not None else
+                                                   row["price_max"] if row["price_max"] is not None else 0,
+                                                   row["date_start"], row["id"]))
+        else:
+            representatives.sort(key=lambda row: (row["date_start"], row["id"]))
+        selected = representatives[filters.offset:filters.offset + filters.limit]
+        full_groups = [self._series_rows(row, status="published") for row in selected]
+        page = [scheduled_record(full, representative=row) for full, row in zip(full_groups, selected)]
         attach_sources(self.db, page, full_groups)
         explanation = None
         if total == 0:

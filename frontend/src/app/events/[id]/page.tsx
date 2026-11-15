@@ -93,7 +93,7 @@ export default async function EventDetail({ params, searchParams }: Props) {
       </dl>
       {event.schedule?.length > 1 && <section className="event-schedule" aria-labelledby="event-schedule-heading"><div className="event-schedule-heading"><span className="issue-label">Выберите удобное время</span><h2 id="event-schedule-heading">Расписание показов <small>{event.schedule.length}</small></h2></div><div className="event-schedule-list">{event.schedule.map((show, index) => <div className="event-schedule-row" key={`${show.date_start}-${index}`}><time dateTime={show.date_start}>{formatDate(show.date_start)}</time>{safeUrl(show.source_url) && <a href={safeUrl(show.source_url)} target="_blank" rel="noopener noreferrer">На сайт площадки <ArrowUpRight size={15} aria-hidden="true" /></a>}</div>)}</div></section>}
       {safeUrl(event.source_url) && <a className="detail-source text-link" href={safeUrl(event.source_url)} target="_blank" rel="noopener noreferrer">Открыть источник события <ArrowUpRight size={16} aria-hidden="true" /><span className="sr-only"> (откроется в новой вкладке)</span></a>}
-      <EventMap lat={event.lat} lon={event.lon} title={event.venue || event.title} />
+      <EventMap lat={event.lat} lon={event.lon} title={event.venue || event.title} city={event.city} address={event.address} />
       <section className="detail-copy" aria-labelledby="event-description-heading">
         <h2 id="event-description-heading">О событии</h2>
         <p itemProp="description">{description && !descriptionCutOff ? description : "Подробности смотрите у организатора."}</p>
